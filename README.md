@@ -41,6 +41,7 @@ It does not initially aim to provide:
 The first version of the gateway is responsible for:
 
 - receiving supported LLM API requests
+- exposing a read-only model discovery endpoint
 - transparently forwarding normal and streaming responses from vLLM
 - resolving request source into `department`
 - proxying the request to a selected vLLM upstream
@@ -55,11 +56,30 @@ The current MVP intentionally keeps scope narrow so the gateway can be built, va
 
 The first version supports:
 
+- `GET /v1/models`
 - `POST /v1/chat/completions`
+- `POST /v1/responses`
+
+### Model Discovery
+
+The gateway should provide a read-only model discovery endpoint so users can check which models are currently available without relying on manual email notifications.
+
+For MVP:
+
+- expose `GET /v1/models`
+- return models known to the gateway routing registry
+- derive model availability from configured upstreams and health state
+- keep the response user-facing and avoid exposing internal machine IPs
 
 Deferred:
 
-- `POST /v1/responses`
+- deployment control through the gateway
+- model lifecycle management workflows
+- administrative write APIs for model registration
+
+### Responses API
+
+MVP should support `/v1/responses` so code agents and responses-based clients can use the gateway without requiring a separate compatibility path.
 
 ### Streaming Behavior
 
@@ -82,6 +102,8 @@ For MVP:
 1. resolve the requested `model_name`
 2. select the upstream pool serving that model
 3. use round-robin across healthy upstreams in that pool
+
+The same routing registry is also the source of truth for `GET /v1/models`.
 
 Deferred:
 
@@ -294,7 +316,9 @@ The MVP should stay intentionally small.
 ### In Scope
 
 - one gateway service
+- read-only `GET /v1/models`
 - support for `/v1/chat/completions`
+- support for `/v1/responses`
 - static upstream list for multiple vLLM services
 - streaming pass-through
 - source resolution from API key
@@ -312,7 +336,7 @@ The MVP should stay intentionally small.
 - billing exports
 - RAG orchestration
 - database access
-- `/v1/responses`
+- model deployment control APIs
 - CIDR fallback-based source resolution
 - generalized multi-service gateway behavior
 
@@ -320,10 +344,12 @@ The MVP should stay intentionally small.
 
 The MVP is successful when:
 
-1. callers use the gateway instead of talking directly to vLLM
-2. one department using multiple IPs still appears as one department in Prometheus metrics
-3. the observability repo can derive department-level request, token, error-rate, and latency views from the emitted metrics
-4. `department="unknown"` is visible and explainable
+1. users can query `GET /v1/models` to discover which models are currently available
+2. callers use the gateway instead of talking directly to vLLM
+3. code agents and responses-based clients can call the gateway through `/v1/responses`
+4. one department using multiple IPs still appears as one department in Prometheus metrics
+5. the observability repo can derive department-level request, token, error-rate, and latency views from the emitted metrics
+6. `department="unknown"` is visible and explainable
 
 ## Operational Risks
 
