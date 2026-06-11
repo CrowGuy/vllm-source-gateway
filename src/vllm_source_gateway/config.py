@@ -1,0 +1,117 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Literal
+
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError, model_validator
+
+
+class ServerConfig(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = Field(default=8080, ge=1, le=65535)
+
+
+class TimeoutsConfig(BaseModel):
+    connect_seconds: float = Field(ge=0)
+    upstream_request_seconds: float = Field(gt=0)
+    stream_idle_seconds: float = Field(gt=0)
+
+
+class RoutingConfig(BaseModel):
+    strategy: Literal["round_robin"] = "round_robin"
+
+
+class UpstreamConfig(BaseModel):
+    name: str = Field(min_length=1)
+    base_url: HttpUrl
+    models: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_models(self) -> "UpstreamConfig":
+        normalized = [model.strip() for model in self.models if model.strip()]
+        if not normalized:
+            raise ValueError("upstream must declare at least one non-empty model name")
+        self.models = normalized
+        return self
+
+
+class DepartmentConfig(BaseModel):
+    api_keys: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_api_keys(self) -> "DepartmentConfig":
+        normalized = [api_key.strip() for api_key in self.api_keys if api_key.strip()]
+        if not normalized:
+            raise ValueError("department must declare at least one non-empty api key")
+        self.api_keys = normalized
+        return self
+
+
+class AppConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    server: ServerConfig
+    timeouts: TimeoutsConfig
+    routing: RoutingConfig
+    upstreams: list[UpstreamConfig] = Field(min_length=1)
+    departments: dict[str, DepartmentConfig] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_unique_constraints(self) -> "AppConfig":
+        upstream_names = [upstream.name for upstream in self.upstreams]
+        if len(upstream_names) != len(set(upstream_names)):
+            raise ValueError("upstream names must be unique")
+
+        seen_api_keys: set[str] = set()
+        for department, config in self.departments.items():
+            normalized_department = department.strip()
+            if not normalized_department:
+                raise ValueError("department names must be non-empty")
+
+            for api_key in config.api_keys:
+                if api_key in seen_api_keys:
+                    raise ValueError(f"api key '{api_key}' is assigned to more than one department")
+                seen_api_keys.add(api_key)
+
+        return self
+
+    @property
+    def model_names(self) -> list[str]:
+        names = {model_name for upstream in self.upstreams for model_name in upstream.models}
+        return sorted(names)
+
+
+class ConfigError(RuntimeError):
+    """Raised when application configuration cannot be loaded."""
+
+
+DEFAULT_CONFIG_ENV_VAR = "VLLM_SOURCE_GATEWAY_CONFIG"
+DEFAULT_CONFIG_PATH = Path("config.yaml")
+
+
+def load_config(config_path: str | Path | None = None) -> AppConfig:
+    resolved_path = Path(config_path) if config_path is not None else DEFAULT_CONFIG_PATH
+
+    if not resolved_path.exists():
+        raise ConfigError(
+            f"configuration file not found: {resolved_path}. "
+            "Create config.yaml from config.example.yaml or set VLLM_SOURCE_GATEWAY_CONFIG."
+        )
+
+    try:
+        raw_config = yaml.safe_load(resolved_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"failed to parse configuration file {resolved_path}: {exc}") from exc
+
+    if raw_config is None:
+        raise ConfigError(f"configuration file is empty: {resolved_path}")
+
+    if not isinstance(raw_config, dict):
+        raise ConfigError(f"configuration root must be a mapping: {resolved_path}")
+
+    try:
+        return AppConfig.model_validate(raw_config)
+    except ValidationError as exc:
+        raise ConfigError(f"invalid configuration in {resolved_path}: {exc}") from exc
+

@@ -1,0 +1,41 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+timeouts:
+  connect_seconds: 5
+  upstream_request_seconds: 120
+  stream_idle_seconds: 30
+
+routing:
+  strategy: "round_robin"
+
+upstreams:
+  - name: "gpt-oss-120b-a"
+    base_url: "http://10.0.0.11:8000"
+    models:
+      - "gpt-oss-120b"
+
+  - name: "gpt-oss-120b-b"
+    base_url: "http://10.0.0.12:8000"
+    models:
+      - "gpt-oss-120b"
+
+  - name: "qwen3-32b-a"
+    base_url: "http://10.0.0.21:8000"
+    models:
+      - "qwen3-32b"
+
+departments:
+  finance:
+    api_keys:
+      - "finance-prod"
+
+  hr:
+    api_keys:
+      - "hr-app"
+
+  data_platform:
+    api_keys:
+      - "dp-prod"
+      - "dp-batch"
