@@ -103,6 +103,7 @@ class FakeUpstreamResponse:
         self.content = content if content is not None else json.dumps(payload).encode("utf-8")
         self.headers = headers or {"content-type": "application/json"}
         self._json_error = json_error
+        self.closed = False
 
     def json(self) -> dict[str, Any]:
         if self._json_error is not None:
@@ -111,26 +112,89 @@ class FakeUpstreamResponse:
             raise ValueError("no json payload configured")
         return self._payload
 
+    async def aiter_bytes(self):
+        yield self.content
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class FakeStreamingUpstreamResponse(FakeUpstreamResponse):
+    def __init__(
+        self,
+        *,
+        chunks: list[bytes],
+        status_code: int = 200,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(
+            status_code=status_code,
+            content=b"".join(chunks),
+            headers=headers or {"content-type": "text/event-stream"},
+            json_error=ValueError("streaming response does not expose json()"),
+        )
+        self._chunks = chunks
+
+    async def aiter_bytes(self):
+        for chunk in self._chunks:
+            yield chunk
+
+
+class FakeBuiltRequest:
+    def __init__(
+        self,
+        *,
+        method: str,
+        url: str,
+        json_body: dict[str, Any],
+        headers: dict[str, str],
+    ) -> None:
+        self.method = method
+        self.url = url
+        self.json_body = json_body
+        self.headers = headers
+
 
 class FakeAsyncClient:
     def __init__(
         self,
         *,
         response: FakeUpstreamResponse | None = None,
+        stream_response: FakeUpstreamResponse | None = None,
         exception: Exception | None = None,
         recorder: dict[str, Any] | None = None,
         timeout: Any = None,
     ) -> None:
         self._response = response or FakeUpstreamResponse(payload={})
+        self._stream_response = stream_response or self._response
         self._exception = exception
         self._recorder = recorder if recorder is not None else {}
         self._recorder["timeout"] = timeout
+        self._recorder["client_closed"] = False
 
     async def __aenter__(self) -> "FakeAsyncClient":
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
         return None
+
+    async def aclose(self) -> None:
+        self._recorder["client_closed"] = True
+
+    def build_request(
+        self,
+        method: str,
+        url: str,
+        *,
+        json: dict[str, Any],
+        headers: dict[str, str],
+    ) -> FakeBuiltRequest:
+        return FakeBuiltRequest(
+            method=method,
+            url=url,
+            json_body=json,
+            headers=headers,
+        )
 
     async def post(
         self,
@@ -146,6 +210,16 @@ class FakeAsyncClient:
             raise self._exception
         return self._response
 
+    async def send(self, request: FakeBuiltRequest, *, stream: bool) -> FakeUpstreamResponse:
+        self._recorder["send_stream"] = stream
+        self._recorder["method"] = request.method
+        self._recorder["url"] = request.url
+        self._recorder["json"] = request.json_body
+        self._recorder["headers"] = request.headers
+        if self._exception is not None:
+            raise self._exception
+        return self._stream_response
+
 
 @pytest.fixture
 def install_fake_async_client(monkeypatch):
@@ -154,6 +228,7 @@ def install_fake_async_client(monkeypatch):
     def _install(
         *,
         response: FakeUpstreamResponse | None = None,
+        stream_response: FakeUpstreamResponse | None = None,
         exception: Exception | None = None,
     ) -> dict[str, Any]:
         recorder: dict[str, Any] = {}
@@ -161,6 +236,7 @@ def install_fake_async_client(monkeypatch):
         def _factory(*, timeout):
             return FakeAsyncClient(
                 response=response,
+                stream_response=stream_response,
                 exception=exception,
                 recorder=recorder,
                 timeout=timeout,

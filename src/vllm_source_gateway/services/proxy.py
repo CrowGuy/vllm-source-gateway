@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import codecs
+import json
 import time
 from typing import Any, Callable
 
 import httpx
 from fastapi import HTTPException, Request, Response, status
+from fastapi.responses import StreamingResponse
 
 from vllm_source_gateway.config import AppConfig
 from vllm_source_gateway.dependencies import SourceResolutionResult
@@ -14,6 +18,8 @@ from vllm_source_gateway.routing import NoHealthyUpstreamError, RoutingRegistry,
 UsageExtractor = Callable[[dict[str, Any]], tuple[int, int] | None]
 
 _EXCLUDED_UPSTREAM_HEADERS = {"authorization", "content-length", "host", "x-api-key"}
+_EXCLUDED_DOWNSTREAM_HEADERS = {"connection", "content-length", "transfer-encoding"}
+_CLIENT_DISCONNECTED_STATUS = 499
 
 
 def _build_upstream_headers(request: Request) -> dict[str, str]:
@@ -42,6 +48,32 @@ def _record_request(
     )
 
 
+def _record_usage(
+    *,
+    metrics: GatewayMetrics,
+    department: str,
+    endpoint_name: str,
+    model_name: str,
+    usage: tuple[int, int] | None,
+) -> None:
+    if usage is None:
+        metrics.record_token_accounting(endpoint=endpoint_name, accounting_status="missing_usage")
+        return
+
+    prompt_tokens, generation_tokens = usage
+    metrics.record_prompt_tokens(
+        department=department,
+        model_name=model_name,
+        prompt_tokens=prompt_tokens,
+    )
+    metrics.record_generation_tokens(
+        department=department,
+        model_name=model_name,
+        generation_tokens=generation_tokens,
+    )
+    metrics.record_token_accounting(endpoint=endpoint_name, accounting_status="recorded")
+
+
 def _raise_http_error(
     *,
     metrics: GatewayMetrics,
@@ -65,6 +97,290 @@ def _raise_http_error(
         started_at=started_at,
     )
     return HTTPException(status_code=status_code, detail=detail)
+
+
+def _build_downstream_headers(upstream_headers: httpx.Headers) -> dict[str, str]:
+    return {
+        key: value
+        for key, value in upstream_headers.items()
+        if key.lower() not in _EXCLUDED_DOWNSTREAM_HEADERS
+    }
+
+
+def _parse_json_payload(
+    *,
+    payload: Any,
+    metrics: GatewayMetrics,
+    department: str,
+    endpoint_name: str,
+    method: str,
+    started_at: float,
+) -> tuple[dict[str, Any], str]:
+    if not isinstance(payload, dict):
+        raise _raise_http_error(
+            metrics=metrics,
+            department=department,
+            endpoint=endpoint_name,
+            method=method,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            started_at=started_at,
+            detail="request body must be a json object",
+        )
+
+    model_name = payload.get("model")
+    if not isinstance(model_name, str) or not model_name.strip():
+        raise _raise_http_error(
+            metrics=metrics,
+            department=department,
+            endpoint=endpoint_name,
+            method=method,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            started_at=started_at,
+            detail="missing model",
+        )
+
+    return payload, model_name
+
+
+def _select_upstream(
+    *,
+    routing_registry: RoutingRegistry,
+    model_name: str,
+    metrics: GatewayMetrics,
+    department: str,
+    endpoint_name: str,
+    method: str,
+    started_at: float,
+) -> str:
+    try:
+        selected = routing_registry.select_upstream(model_name)
+    except UnknownModelError as exc:
+        raise _raise_http_error(
+            metrics=metrics,
+            department=department,
+            endpoint=endpoint_name,
+            method=method,
+            status_code=status.HTTP_404_NOT_FOUND,
+            started_at=started_at,
+            detail=str(exc),
+        ) from exc
+    except NoHealthyUpstreamError as exc:
+        raise _raise_http_error(
+            metrics=metrics,
+            department=department,
+            endpoint=endpoint_name,
+            method=method,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            started_at=started_at,
+            detail=str(exc),
+        ) from exc
+
+    return selected.upstream.base_url
+
+
+def _consume_sse_events(
+    *,
+    buffer: str,
+    fragment: str,
+    usage_extractor: UsageExtractor,
+    latest_usage: tuple[int, int] | None,
+) -> tuple[str, tuple[int, int] | None]:
+    normalized_buffer = (buffer + fragment).replace("\r\n", "\n")
+
+    while "\n\n" in normalized_buffer:
+        raw_event, normalized_buffer = normalized_buffer.split("\n\n", 1)
+        data_lines = []
+        for line in raw_event.split("\n"):
+            if line.startswith("data:"):
+                data_lines.append(line[5:].lstrip())
+
+        if not data_lines:
+            continue
+
+        event_payload = "\n".join(data_lines)
+        if event_payload == "[DONE]":
+            continue
+
+        try:
+            parsed_payload = json.loads(event_payload)
+        except json.JSONDecodeError:
+            continue
+
+        usage = usage_extractor(parsed_payload)
+        if usage is not None:
+            latest_usage = usage
+
+    return normalized_buffer, latest_usage
+
+
+def _streaming_timeout(config: AppConfig) -> httpx.Timeout:
+    return httpx.Timeout(
+        connect=config.timeouts.connect_seconds,
+        read=config.timeouts.stream_idle_seconds,
+        write=config.timeouts.upstream_request_seconds,
+        pool=config.timeouts.upstream_request_seconds,
+    )
+
+
+def _request_timeout(config: AppConfig) -> httpx.Timeout:
+    return httpx.Timeout(
+        timeout=config.timeouts.upstream_request_seconds,
+        connect=config.timeouts.connect_seconds,
+    )
+
+
+async def _proxy_streaming_response(
+    *,
+    request: Request,
+    config: AppConfig,
+    metrics: GatewayMetrics,
+    department: str,
+    endpoint_name: str,
+    upstream_url: str,
+    payload: dict[str, Any],
+    model_name: str,
+    method: str,
+    started_at: float,
+    usage_extractor: UsageExtractor,
+) -> Response:
+    client = httpx.AsyncClient(timeout=_streaming_timeout(config))
+    request_headers = _build_upstream_headers(request)
+
+    try:
+        upstream_request = client.build_request(
+            "POST",
+            upstream_url,
+            json=payload,
+            headers=request_headers,
+        )
+        upstream_response = await client.send(upstream_request, stream=True)
+    except httpx.TimeoutException as exc:
+        await client.aclose()
+        raise _raise_http_error(
+            metrics=metrics,
+            department=department,
+            endpoint=endpoint_name,
+            method=method,
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            started_at=started_at,
+            detail="upstream request timed out",
+            accounting_status="missing_usage",
+        ) from exc
+    except httpx.HTTPError as exc:
+        await client.aclose()
+        raise _raise_http_error(
+            metrics=metrics,
+            department=department,
+            endpoint=endpoint_name,
+            method=method,
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            started_at=started_at,
+            detail="upstream request failed",
+            accounting_status="missing_usage",
+        ) from exc
+
+    async def _stream_bytes():
+        latest_usage: tuple[int, int] | None = None
+        decode_buffer = ""
+        parsing_enabled = True
+        decoder = codecs.getincrementaldecoder("utf-8")()
+        client_disconnected = False
+        stream_failed = False
+
+        try:
+            async for chunk in upstream_response.aiter_bytes():
+                if await request.is_disconnected():
+                    client_disconnected = True
+                    break
+
+                if parsing_enabled and chunk:
+                    try:
+                        fragment = decoder.decode(chunk)
+                    except UnicodeDecodeError:
+                        parsing_enabled = False
+                    else:
+                        decode_buffer, latest_usage = _consume_sse_events(
+                            buffer=decode_buffer,
+                            fragment=fragment,
+                            usage_extractor=usage_extractor,
+                            latest_usage=latest_usage,
+                        )
+
+                yield chunk
+
+            if parsing_enabled and not client_disconnected:
+                try:
+                    final_fragment = decoder.decode(b"", final=True)
+                except UnicodeDecodeError:
+                    parsing_enabled = False
+                else:
+                    decode_buffer, latest_usage = _consume_sse_events(
+                        buffer=decode_buffer,
+                        fragment=final_fragment,
+                        usage_extractor=usage_extractor,
+                        latest_usage=latest_usage,
+                    )
+        except asyncio.CancelledError:
+            client_disconnected = True
+            raise
+        except httpx.HTTPError:
+            stream_failed = True
+            raise
+        finally:
+            await upstream_response.aclose()
+            await client.aclose()
+
+            if client_disconnected:
+                metrics.record_token_accounting(
+                    endpoint=endpoint_name,
+                    accounting_status="missing_usage",
+                )
+                _record_request(
+                    metrics=metrics,
+                    department=department,
+                    endpoint=endpoint_name,
+                    method=method,
+                    status_code=_CLIENT_DISCONNECTED_STATUS,
+                    started_at=started_at,
+                )
+                return
+
+            if stream_failed:
+                metrics.record_token_accounting(
+                    endpoint=endpoint_name,
+                    accounting_status="missing_usage",
+                )
+                _record_request(
+                    metrics=metrics,
+                    department=department,
+                    endpoint=endpoint_name,
+                    method=method,
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    started_at=started_at,
+                )
+                return
+
+            _record_usage(
+                metrics=metrics,
+                department=department,
+                endpoint_name=endpoint_name,
+                model_name=model_name,
+                usage=latest_usage,
+            )
+            _record_request(
+                metrics=metrics,
+                department=department,
+                endpoint=endpoint_name,
+                method=method,
+                status_code=upstream_response.status_code,
+                started_at=started_at,
+            )
+
+    return StreamingResponse(
+        _stream_bytes(),
+        status_code=upstream_response.status_code,
+        headers=_build_downstream_headers(upstream_response.headers),
+    )
 
 
 async def proxy_json_endpoint(
@@ -100,73 +416,43 @@ async def proxy_json_endpoint(
             detail="invalid json body",
         ) from exc
 
-    if not isinstance(payload, dict):
-        raise _raise_http_error(
-            metrics=metrics,
-            department=department,
-            endpoint=endpoint_name,
-            method=method,
-            status_code=status.HTTP_400_BAD_REQUEST,
-            started_at=started_at,
-            detail="request body must be a json object",
-        )
-
-    model_name = payload.get("model")
-    if not isinstance(model_name, str) or not model_name.strip():
-        raise _raise_http_error(
-            metrics=metrics,
-            department=department,
-            endpoint=endpoint_name,
-            method=method,
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            started_at=started_at,
-            detail="missing model",
-        )
-
-    if payload.get("stream") is True:
-        raise _raise_http_error(
-            metrics=metrics,
-            department=department,
-            endpoint=endpoint_name,
-            method=method,
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            started_at=started_at,
-            detail="streaming not implemented yet",
-            accounting_status="missing_usage",
-        )
-
-    try:
-        selected = routing_registry.select_upstream(model_name)
-    except UnknownModelError as exc:
-        raise _raise_http_error(
-            metrics=metrics,
-            department=department,
-            endpoint=endpoint_name,
-            method=method,
-            status_code=status.HTTP_404_NOT_FOUND,
-            started_at=started_at,
-            detail=str(exc),
-        ) from exc
-    except NoHealthyUpstreamError as exc:
-        raise _raise_http_error(
-            metrics=metrics,
-            department=department,
-            endpoint=endpoint_name,
-            method=method,
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            started_at=started_at,
-            detail=str(exc),
-        ) from exc
-
-    timeout = httpx.Timeout(
-        timeout=config.timeouts.upstream_request_seconds,
-        connect=config.timeouts.connect_seconds,
+    payload, model_name = _parse_json_payload(
+        payload=payload,
+        metrics=metrics,
+        department=department,
+        endpoint_name=endpoint_name,
+        method=method,
+        started_at=started_at,
+    )
+    upstream_base_url = _select_upstream(
+        routing_registry=routing_registry,
+        model_name=model_name,
+        metrics=metrics,
+        department=department,
+        endpoint_name=endpoint_name,
+        method=method,
+        started_at=started_at,
     )
 
+    if payload.get("stream") is True:
+        return await _proxy_streaming_response(
+            request=request,
+            config=config,
+            metrics=metrics,
+            department=department,
+            endpoint_name=endpoint_name,
+            upstream_url=f"{upstream_base_url}{upstream_path}",
+            payload=payload,
+            model_name=model_name,
+            method=method,
+            started_at=started_at,
+            usage_extractor=usage_extractor,
+        )
+
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=_request_timeout(config)) as client:
             upstream_response = await client.post(
-                f"{selected.upstream.base_url}{upstream_path}",
+                f"{upstream_base_url}{upstream_path}",
                 json=payload,
                 headers=_build_upstream_headers(request),
             )
@@ -211,22 +497,13 @@ async def proxy_json_endpoint(
             media_type=upstream_response.headers.get("content-type"),
         )
 
-    usage = usage_extractor(response_payload)
-    if usage is None:
-        metrics.record_token_accounting(endpoint=endpoint_name, accounting_status="missing_usage")
-    else:
-        prompt_tokens, generation_tokens = usage
-        metrics.record_prompt_tokens(
-            department=department,
-            model_name=model_name,
-            prompt_tokens=prompt_tokens,
-        )
-        metrics.record_generation_tokens(
-            department=department,
-            model_name=model_name,
-            generation_tokens=generation_tokens,
-        )
-        metrics.record_token_accounting(endpoint=endpoint_name, accounting_status="recorded")
+    _record_usage(
+        metrics=metrics,
+        department=department,
+        endpoint_name=endpoint_name,
+        model_name=model_name,
+        usage=usage_extractor(response_payload),
+    )
 
     _record_request(
         metrics=metrics,
