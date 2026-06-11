@@ -1,0 +1,100 @@
+from __future__ import annotations
+
+from vllm_source_gateway.config import AppConfig
+from vllm_source_gateway.dependencies import (
+    UNKNOWN_DEPARTMENT,
+    extract_api_key,
+    resolve_department_for_api_key,
+)
+
+from tests.conftest import FakeUpstreamResponse
+
+
+def test_extract_api_key_prefers_x_api_key_over_authorization() -> None:
+    api_key = extract_api_key(
+        authorization="Bearer bearer-token",
+        x_api_key="header-key",
+    )
+
+    assert api_key == "header-key"
+
+
+def test_extract_api_key_reads_bearer_authorization() -> None:
+    api_key = extract_api_key(
+        authorization="Bearer bearer-token",
+        x_api_key=None,
+    )
+
+    assert api_key == "bearer-token"
+
+
+def test_resolve_department_for_api_key_returns_mapped_department(sample_config_dict) -> None:
+    config = AppConfig.model_validate(sample_config_dict)
+
+    result = resolve_department_for_api_key(config, "key-dept-a")
+
+    assert result.department == "dept-a"
+    assert result.api_key == "key-dept-a"
+    assert result.resolution_source == "api_key"
+
+
+def test_resolve_department_for_api_key_returns_unknown_for_missing_key(sample_config_dict) -> None:
+    config = AppConfig.model_validate(sample_config_dict)
+
+    result = resolve_department_for_api_key(config, None)
+
+    assert result.department == UNKNOWN_DEPARTMENT
+    assert result.api_key is None
+    assert result.resolution_source == "unknown"
+
+
+def test_resolve_department_for_api_key_returns_unknown_for_unmapped_key(sample_config_dict) -> None:
+    config = AppConfig.model_validate(sample_config_dict)
+
+    result = resolve_department_for_api_key(config, "missing-key")
+
+    assert result.department == UNKNOWN_DEPARTMENT
+    assert result.api_key == "missing-key"
+    assert result.resolution_source == "unknown"
+
+
+def test_chat_completions_records_unknown_source_resolution_for_unmapped_key(
+    app_client,
+    install_fake_async_client,
+) -> None:
+    install_fake_async_client(
+        response=FakeUpstreamResponse(
+            payload={
+                "id": "chatcmpl-unknown",
+                "object": "chat.completion",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "hello"}}],
+                "usage": {"prompt_tokens": 3, "completion_tokens": 5},
+            }
+        )
+    )
+
+    response = app_client.post(
+        "/v1/chat/completions",
+        headers={"x-api-key": "unmapped-key"},
+        json={
+            "model": "shared-model",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    assert response.status_code == 200
+
+    metrics_text = app_client.get("/metrics").text
+
+    assert (
+        'gateway_source_resolution_total{department="unknown",resolution_source="unknown"} 1.0'
+        in metrics_text
+    )
+    assert (
+        'gateway_prompt_tokens_total{department="unknown",model_name="shared-model"} 3.0'
+        in metrics_text
+    )
+    assert (
+        'gateway_generation_tokens_total{department="unknown",model_name="shared-model"} 5.0'
+        in metrics_text
+    )

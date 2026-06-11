@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import copy
+import json
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -84,3 +86,87 @@ def app_client(sample_config_path: Path) -> Iterator[TestClient]:
 
     with TestClient(create_app(config_path=sample_config_path)) as client:
         yield client
+
+
+class FakeUpstreamResponse:
+    def __init__(
+        self,
+        *,
+        status_code: int = 200,
+        payload: dict[str, Any] | None = None,
+        content: bytes | None = None,
+        headers: dict[str, str] | None = None,
+        json_error: Exception | None = None,
+    ) -> None:
+        self.status_code = status_code
+        self._payload = payload
+        self.content = content if content is not None else json.dumps(payload).encode("utf-8")
+        self.headers = headers or {"content-type": "application/json"}
+        self._json_error = json_error
+
+    def json(self) -> dict[str, Any]:
+        if self._json_error is not None:
+            raise self._json_error
+        if self._payload is None:
+            raise ValueError("no json payload configured")
+        return self._payload
+
+
+class FakeAsyncClient:
+    def __init__(
+        self,
+        *,
+        response: FakeUpstreamResponse | None = None,
+        exception: Exception | None = None,
+        recorder: dict[str, Any] | None = None,
+        timeout: Any = None,
+    ) -> None:
+        self._response = response or FakeUpstreamResponse(payload={})
+        self._exception = exception
+        self._recorder = recorder if recorder is not None else {}
+        self._recorder["timeout"] = timeout
+
+    async def __aenter__(self) -> "FakeAsyncClient":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    async def post(
+        self,
+        url: str,
+        *,
+        json: dict[str, Any],
+        headers: dict[str, str],
+    ) -> FakeUpstreamResponse:
+        self._recorder["url"] = url
+        self._recorder["json"] = json
+        self._recorder["headers"] = headers
+        if self._exception is not None:
+            raise self._exception
+        return self._response
+
+
+@pytest.fixture
+def install_fake_async_client(monkeypatch):
+    from vllm_source_gateway.services import proxy
+
+    def _install(
+        *,
+        response: FakeUpstreamResponse | None = None,
+        exception: Exception | None = None,
+    ) -> dict[str, Any]:
+        recorder: dict[str, Any] = {}
+
+        def _factory(*, timeout):
+            return FakeAsyncClient(
+                response=response,
+                exception=exception,
+                recorder=recorder,
+                timeout=timeout,
+            )
+
+        monkeypatch.setattr(proxy.httpx, "AsyncClient", _factory)
+        return recorder
+
+    return _install
