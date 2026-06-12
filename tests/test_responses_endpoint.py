@@ -12,6 +12,13 @@ def test_responses_proxies_success_and_records_usage(
     recorder = install_fake_async_client(
         app_client=app_client,
         response=FakeUpstreamResponse(
+            headers={
+                "content-type": "application/json",
+                "connection": "keep-alive",
+                "keep-alive": "timeout=5",
+                "transfer-encoding": "chunked",
+                "content-encoding": "gzip",
+            },
             payload={
                 "id": "resp-123",
                 "object": "response",
@@ -34,6 +41,11 @@ def test_responses_proxies_success_and_records_usage(
     assert response.json()["id"] == "resp-123"
     assert recorder["url"] == "http://10.0.0.2:8000/v1/responses"
     assert recorder["json"]["model"] == "model-b"
+    assert response.headers["content-type"].startswith("application/json")
+    assert "connection" not in response.headers
+    assert "keep-alive" not in response.headers
+    assert "transfer-encoding" not in response.headers
+    assert "content-encoding" not in response.headers
 
     metrics_response = app_client.get("/metrics")
     metrics_text = metrics_response.text

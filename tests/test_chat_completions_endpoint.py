@@ -26,7 +26,11 @@ def test_chat_completions_proxies_success_and_records_usage(
         headers={
             "x-api-key": "key-dept-a",
             "authorization": "Bearer user-token",
+            "cookie": "session=abc",
+            "accept-encoding": "gzip",
+            "connection": "keep-alive",
             "x-trace-id": "trace-123",
+            "x-request-id": "req-123",
         },
         json={
             "model": "shared-model",
@@ -39,8 +43,12 @@ def test_chat_completions_proxies_success_and_records_usage(
     assert recorder["url"] == "http://10.0.0.1:8000/v1/chat/completions"
     assert recorder["json"]["model"] == "shared-model"
     assert recorder["headers"]["x-trace-id"] == "trace-123"
+    assert recorder["headers"]["x-request-id"] == "req-123"
     assert "x-api-key" not in recorder["headers"]
     assert "authorization" not in recorder["headers"]
+    assert "cookie" not in recorder["headers"]
+    assert "accept-encoding" not in recorder["headers"]
+    assert "connection" not in recorder["headers"]
 
     metrics_response = app_client.get("/metrics")
     metrics_text = metrics_response.text

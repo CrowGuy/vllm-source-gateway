@@ -17,16 +17,63 @@ from vllm_source_gateway.routing import NoHealthyUpstreamError, RoutingRegistry,
 
 UsageExtractor = Callable[[dict[str, Any]], tuple[int, int] | None]
 
-_EXCLUDED_UPSTREAM_HEADERS = {"authorization", "content-length", "host", "x-api-key"}
-_EXCLUDED_DOWNSTREAM_HEADERS = {"connection", "content-length", "transfer-encoding"}
+_HOP_BY_HOP_HEADERS = {
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+}
+_ALLOWED_UPSTREAM_HEADERS = {
+    "accept",
+    "accept-language",
+    "content-type",
+    "user-agent",
+    "openai-organization",
+    "openai-project",
+    "openai-beta",
+    "idempotency-key",
+    "traceparent",
+    "tracestate",
+    "baggage",
+    "x-request-id",
+    "x-correlation-id",
+    "x-trace-id",
+    "x-openai-client-user-agent",
+}
+_ALLOWED_UPSTREAM_HEADER_PREFIXES = ("x-stainless-",)
+_BLOCKED_UPSTREAM_HEADERS = _HOP_BY_HOP_HEADERS | {
+    "authorization",
+    "accept-encoding",
+    "content-length",
+    "cookie",
+    "host",
+    "x-api-key",
+}
+_EXCLUDED_DOWNSTREAM_HEADERS = _HOP_BY_HOP_HEADERS | {
+    "content-encoding",
+    "content-length",
+}
 _CLIENT_DISCONNECTED_STATUS = 499
+
+
+def _should_forward_upstream_header(header_name: str) -> bool:
+    normalized = header_name.lower()
+    if normalized in _BLOCKED_UPSTREAM_HEADERS:
+        return False
+    if normalized in _ALLOWED_UPSTREAM_HEADERS:
+        return True
+    return normalized.startswith(_ALLOWED_UPSTREAM_HEADER_PREFIXES)
 
 
 def _build_upstream_headers(request: Request) -> dict[str, str]:
     return {
         key: value
         for key, value in request.headers.items()
-        if key.lower() not in _EXCLUDED_UPSTREAM_HEADERS
+        if _should_forward_upstream_header(key)
     }
 
 
