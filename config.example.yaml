@@ -7,6 +7,12 @@ timeouts:
   upstream_request_seconds: 120
   stream_idle_seconds: 30
 
+health:
+  enabled: true
+  probe_path: "/v1/models"
+  check_interval_seconds: 15
+  request_timeout_seconds: 3
+
 routing:
   strategy: "round_robin"
 

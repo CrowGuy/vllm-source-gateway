@@ -18,6 +18,21 @@ class TimeoutsConfig(BaseModel):
     stream_idle_seconds: float = Field(gt=0)
 
 
+class HealthConfig(BaseModel):
+    enabled: bool = True
+    probe_path: str = "/v1/models"
+    check_interval_seconds: float = Field(default=15.0, gt=0)
+    request_timeout_seconds: float = Field(default=3.0, gt=0)
+
+    @model_validator(mode="after")
+    def validate_probe_path(self) -> "HealthConfig":
+        normalized = self.probe_path.strip()
+        if not normalized.startswith("/"):
+            raise ValueError("health probe_path must start with '/'")
+        self.probe_path = normalized
+        return self
+
+
 class RoutingConfig(BaseModel):
     strategy: Literal["round_robin"] = "round_robin"
 
@@ -53,6 +68,7 @@ class AppConfig(BaseModel):
 
     server: ServerConfig
     timeouts: TimeoutsConfig
+    health: HealthConfig = Field(default_factory=HealthConfig)
     routing: RoutingConfig
     upstreams: list[UpstreamConfig] = Field(min_length=1)
     departments: dict[str, DepartmentConfig] = Field(min_length=1)
@@ -114,4 +130,3 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         return AppConfig.model_validate(raw_config)
     except ValidationError as exc:
         raise ConfigError(f"invalid configuration in {resolved_path}: {exc}") from exc
-

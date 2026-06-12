@@ -31,6 +31,12 @@ def sample_config_dict() -> dict[str, object]:
             "upstream_request_seconds": 30.0,
             "stream_idle_seconds": 15.0,
         },
+        "health": {
+            "enabled": False,
+            "probe_path": "/v1/models",
+            "check_interval_seconds": 15.0,
+            "request_timeout_seconds": 1.0,
+        },
         "routing": {
             "strategy": "round_robin",
         },

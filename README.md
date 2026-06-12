@@ -175,6 +175,7 @@ Configuration areas should include:
 
 - `server`
 - `timeouts`
+- `health`
 - `routing`
 - `upstreams`
 - `departments`
@@ -420,6 +421,9 @@ One successful real-upstream validation record is documented in
 - the gateway becomes a new failure point if timeouts and health handling are weak
 - API-key ownership can drift if keys are shared or poorly governed
 - token accounting can become incomplete if upstream usage is missing or parsed inconsistently
+
+Current reviewer-feedback triage and hardening priorities are documented in
+[docs/reviewer-findings-triage.md](/home/randy/Documents/crow/vllm-source-gateway/docs/reviewer-findings-triage.md).
 
 ## Recommended Evolution Path
 
