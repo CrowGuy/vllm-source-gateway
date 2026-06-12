@@ -63,6 +63,7 @@ def test_chat_completions_records_unknown_source_resolution_for_unmapped_key(
     install_fake_async_client,
 ) -> None:
     install_fake_async_client(
+        app_client=app_client,
         response=FakeUpstreamResponse(
             payload={
                 "id": "chatcmpl-unknown",

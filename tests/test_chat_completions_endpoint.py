@@ -10,6 +10,7 @@ def test_chat_completions_proxies_success_and_records_usage(
     install_fake_async_client,
 ) -> None:
     recorder = install_fake_async_client(
+        app_client=app_client,
         response=FakeUpstreamResponse(
             payload={
                 "id": "chatcmpl-123",
@@ -77,7 +78,7 @@ def test_chat_completions_returns_504_on_upstream_timeout(
     app_client,
     install_fake_async_client,
 ) -> None:
-    install_fake_async_client(exception=httpx.TimeoutException("timed out"))
+    install_fake_async_client(app_client=app_client, exception=httpx.TimeoutException("timed out"))
 
     response = app_client.post(
         "/v1/chat/completions",
@@ -106,6 +107,7 @@ def test_chat_completions_streams_sse_and_records_usage(
     install_fake_async_client,
 ) -> None:
     recorder = install_fake_async_client(
+        app_client=app_client,
         stream_response=FakeStreamingUpstreamResponse(
             chunks=[
                 b'data: {"id":"chunk-1","choices":[{"delta":{"content":"hel"}}]}\n\n',

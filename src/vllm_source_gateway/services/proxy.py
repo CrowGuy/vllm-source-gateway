@@ -213,15 +213,6 @@ def _consume_sse_events(
     return normalized_buffer, latest_usage
 
 
-def _streaming_timeout(config: AppConfig) -> httpx.Timeout:
-    return httpx.Timeout(
-        connect=config.timeouts.connect_seconds,
-        read=config.timeouts.stream_idle_seconds,
-        write=config.timeouts.upstream_request_seconds,
-        pool=config.timeouts.upstream_request_seconds,
-    )
-
-
 def _request_timeout(config: AppConfig) -> httpx.Timeout:
     return httpx.Timeout(
         timeout=config.timeouts.upstream_request_seconds,
@@ -232,8 +223,8 @@ def _request_timeout(config: AppConfig) -> httpx.Timeout:
 async def _proxy_streaming_response(
     *,
     request: Request,
-    config: AppConfig,
     metrics: GatewayMetrics,
+    upstream_streaming_http_client: httpx.AsyncClient,
     department: str,
     endpoint_name: str,
     upstream_url: str,
@@ -243,19 +234,20 @@ async def _proxy_streaming_response(
     started_at: float,
     usage_extractor: UsageExtractor,
 ) -> Response:
-    client = httpx.AsyncClient(timeout=_streaming_timeout(config))
     request_headers = _build_upstream_headers(request)
 
     try:
-        upstream_request = client.build_request(
+        upstream_request = upstream_streaming_http_client.build_request(
             "POST",
             upstream_url,
             json=payload,
             headers=request_headers,
         )
-        upstream_response = await client.send(upstream_request, stream=True)
+        upstream_response = await upstream_streaming_http_client.send(
+            upstream_request,
+            stream=True,
+        )
     except httpx.TimeoutException as exc:
-        await client.aclose()
         raise _raise_http_error(
             metrics=metrics,
             department=department,
@@ -267,7 +259,6 @@ async def _proxy_streaming_response(
             accounting_status="missing_usage",
         ) from exc
     except httpx.HTTPError as exc:
-        await client.aclose()
         raise _raise_http_error(
             metrics=metrics,
             department=department,
@@ -328,7 +319,6 @@ async def _proxy_streaming_response(
             raise
         finally:
             await upstream_response.aclose()
-            await client.aclose()
 
             if client_disconnected:
                 metrics.record_token_accounting(
@@ -390,6 +380,8 @@ async def proxy_json_endpoint(
     routing_registry: RoutingRegistry,
     metrics: GatewayMetrics,
     source_resolution: SourceResolutionResult,
+    upstream_http_client: httpx.AsyncClient,
+    upstream_streaming_http_client: httpx.AsyncClient,
     endpoint_name: str,
     upstream_path: str,
     usage_extractor: UsageExtractor,
@@ -437,8 +429,8 @@ async def proxy_json_endpoint(
     if payload.get("stream") is True:
         return await _proxy_streaming_response(
             request=request,
-            config=config,
             metrics=metrics,
+            upstream_streaming_http_client=upstream_streaming_http_client,
             department=department,
             endpoint_name=endpoint_name,
             upstream_url=f"{upstream_base_url}{upstream_path}",
@@ -450,12 +442,12 @@ async def proxy_json_endpoint(
         )
 
     try:
-        async with httpx.AsyncClient(timeout=_request_timeout(config)) as client:
-            upstream_response = await client.post(
-                f"{upstream_base_url}{upstream_path}",
-                json=payload,
-                headers=_build_upstream_headers(request),
-            )
+        upstream_response = await upstream_http_client.post(
+            f"{upstream_base_url}{upstream_path}",
+            json=payload,
+            headers=_build_upstream_headers(request),
+            timeout=_request_timeout(config),
+        )
     except httpx.TimeoutException as exc:
         raise _raise_http_error(
             metrics=metrics,

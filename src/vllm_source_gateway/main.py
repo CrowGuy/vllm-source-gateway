@@ -5,6 +5,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -29,6 +30,21 @@ logging.basicConfig(
 logger = logging.getLogger("vllm_source_gateway")
 
 
+UPSTREAM_CLIENT_LIMITS = httpx.Limits(
+    max_connections=200,
+    max_keepalive_connections=50,
+)
+
+
+def _build_streaming_timeout(config) -> httpx.Timeout:
+    return httpx.Timeout(
+        connect=config.timeouts.connect_seconds,
+        read=config.timeouts.stream_idle_seconds,
+        write=config.timeouts.upstream_request_seconds,
+        pool=config.timeouts.upstream_request_seconds,
+    )
+
+
 def _resolve_config_path(config_path: str | Path | None) -> Path:
     if config_path is not None:
         return Path(config_path)
@@ -43,6 +59,11 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         config = load_config(resolved_config_path)
         routing_registry = RoutingRegistry.from_config(config)
         metrics = GatewayMetrics()
+        upstream_http_client = httpx.AsyncClient(limits=UPSTREAM_CLIENT_LIMITS)
+        upstream_streaming_http_client = httpx.AsyncClient(
+            limits=UPSTREAM_CLIENT_LIMITS,
+            timeout=_build_streaming_timeout(config),
+        )
         upstream_health_monitor = UpstreamHealthMonitor(
             config=config,
             routing_registry=routing_registry,
@@ -52,6 +73,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         app.state.config_path = str(resolved_config_path)
         app.state.routing_registry = routing_registry
         app.state.metrics = metrics
+        app.state.upstream_http_client = upstream_http_client
+        app.state.upstream_streaming_http_client = upstream_streaming_http_client
         app.state.upstream_health_monitor = upstream_health_monitor
 
         logger.info(
@@ -65,6 +88,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         )
         yield
         await upstream_health_monitor.stop()
+        await upstream_http_client.aclose()
+        await upstream_streaming_http_client.aclose()
 
     app = FastAPI(
         title="vllm-source-gateway",

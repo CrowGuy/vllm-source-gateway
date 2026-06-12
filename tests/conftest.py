@@ -208,10 +208,12 @@ class FakeAsyncClient:
         *,
         json: dict[str, Any],
         headers: dict[str, str],
+        timeout: Any = None,
     ) -> FakeUpstreamResponse:
         self._recorder["url"] = url
         self._recorder["json"] = json
         self._recorder["headers"] = headers
+        self._recorder["request_timeout"] = timeout
         if self._exception is not None:
             raise self._exception
         return self._response
@@ -228,27 +230,23 @@ class FakeAsyncClient:
 
 
 @pytest.fixture
-def install_fake_async_client(monkeypatch):
-    from vllm_source_gateway.services import proxy
-
+def install_fake_async_client():
     def _install(
         *,
+        app_client,
         response: FakeUpstreamResponse | None = None,
         stream_response: FakeUpstreamResponse | None = None,
         exception: Exception | None = None,
     ) -> dict[str, Any]:
         recorder: dict[str, Any] = {}
-
-        def _factory(*, timeout):
-            return FakeAsyncClient(
-                response=response,
-                stream_response=stream_response,
-                exception=exception,
-                recorder=recorder,
-                timeout=timeout,
-            )
-
-        monkeypatch.setattr(proxy.httpx, "AsyncClient", _factory)
+        fake_client = FakeAsyncClient(
+            response=response,
+            stream_response=stream_response,
+            exception=exception,
+            recorder=recorder,
+        )
+        app_client.app.state.upstream_http_client = fake_client
+        app_client.app.state.upstream_streaming_http_client = fake_client
         return recorder
 
     return _install

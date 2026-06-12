@@ -10,6 +10,7 @@ def test_chat_completions_records_parse_error_and_returns_raw_body(
     install_fake_async_client,
 ) -> None:
     install_fake_async_client(
+        app_client=app_client,
         response=FakeUpstreamResponse(
             status_code=200,
             content=b"not-json",
@@ -45,7 +46,7 @@ def test_responses_timeout_records_missing_usage_without_token_counters(
     app_client,
     install_fake_async_client,
 ) -> None:
-    install_fake_async_client(exception=httpx.TimeoutException("timed out"))
+    install_fake_async_client(app_client=app_client, exception=httpx.TimeoutException("timed out"))
 
     response = app_client.post(
         "/v1/responses",
@@ -74,6 +75,7 @@ def test_chat_completions_zero_usage_records_accounting_without_incrementing_tok
     install_fake_async_client,
 ) -> None:
     install_fake_async_client(
+        app_client=app_client,
         response=FakeUpstreamResponse(
             payload={
                 "id": "chatcmpl-zero",

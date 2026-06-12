@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import httpx
 from fastapi import Depends, Header, HTTPException, Request, status
 
 from vllm_source_gateway.config import AppConfig
@@ -42,6 +43,20 @@ def get_gateway_metrics(request: Request) -> GatewayMetrics:
     if metrics is None:
         raise DependencyStateError("metrics registry is not loaded")
     return metrics
+
+
+def get_upstream_http_client(request: Request) -> httpx.AsyncClient:
+    client = getattr(request.app.state, "upstream_http_client", None)
+    if client is None:
+        raise DependencyStateError("upstream http client is not loaded")
+    return client
+
+
+def get_upstream_streaming_http_client(request: Request) -> httpx.AsyncClient:
+    client = getattr(request.app.state, "upstream_streaming_http_client", None)
+    if client is None:
+        raise DependencyStateError("upstream streaming http client is not loaded")
+    return client
 
 
 def extract_api_key(

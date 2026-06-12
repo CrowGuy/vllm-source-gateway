@@ -10,6 +10,7 @@ def test_responses_proxies_success_and_records_usage(
     install_fake_async_client,
 ) -> None:
     recorder = install_fake_async_client(
+        app_client=app_client,
         response=FakeUpstreamResponse(
             payload={
                 "id": "resp-123",
@@ -47,6 +48,7 @@ def test_responses_tracks_missing_usage_without_guessing_tokens(
     install_fake_async_client,
 ) -> None:
     install_fake_async_client(
+        app_client=app_client,
         response=FakeUpstreamResponse(
             payload={
                 "id": "resp-usage-missing",
@@ -79,7 +81,7 @@ def test_responses_returns_502_on_upstream_http_error(
     app_client,
     install_fake_async_client,
 ) -> None:
-    install_fake_async_client(exception=httpx.ConnectError("connection failed"))
+    install_fake_async_client(app_client=app_client, exception=httpx.ConnectError("connection failed"))
 
     response = app_client.post(
         "/v1/responses",
@@ -110,6 +112,7 @@ def test_responses_streams_sse_and_tracks_missing_usage(
     install_fake_async_client,
 ) -> None:
     install_fake_async_client(
+        app_client=app_client,
         stream_response=FakeStreamingUpstreamResponse(
             chunks=[
                 b'data: {"id":"resp-1","output":[{"type":"output_text","text":"hel"}]}\n\n',
