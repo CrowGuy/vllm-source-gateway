@@ -36,3 +36,32 @@ def test_load_config_rejects_duplicate_api_keys(sample_config_copy, write_config
 
     with pytest.raises(ConfigError, match="assigned to more than one department"):
         load_config(config_path)
+
+
+@pytest.mark.parametrize(
+    ("mutation_path", "mutation_value"),
+    [
+        (("server", "extra_field"), "unexpected"),
+        (("timeouts", "extra_field"), 123),
+        (("health", "extra_field"), True),
+        (("routing", "extra_field"), "unexpected"),
+        (("security", "extra_field"), True),
+        (("upstreams", 0, "extra_field"), "unexpected"),
+        (("departments", "dept-a", "extra_field"), "unexpected"),
+    ],
+)
+def test_load_config_rejects_unknown_nested_fields(
+    sample_config_copy,
+    write_config,
+    mutation_path,
+    mutation_value,
+) -> None:
+    target = sample_config_copy
+    for key in mutation_path[:-1]:
+        target = target[key]
+    target[mutation_path[-1]] = mutation_value
+
+    config_path = write_config(sample_config_copy, filename="unknown-nested-field.yaml")
+
+    with pytest.raises(ConfigError, match="Extra inputs are not permitted"):
+        load_config(config_path)

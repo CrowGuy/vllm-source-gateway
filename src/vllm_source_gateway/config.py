@@ -8,17 +8,23 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError, mod
 
 
 class ServerConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     host: str = "0.0.0.0"
     port: int = Field(default=8080, ge=1, le=65535)
 
 
 class TimeoutsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     connect_seconds: float = Field(ge=0)
     upstream_request_seconds: float = Field(gt=0)
     stream_idle_seconds: float = Field(gt=0)
 
 
 class HealthConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     enabled: bool = True
     probe_path: str = "/v1/models"
     check_interval_seconds: float = Field(default=15.0, gt=0)
@@ -34,14 +40,20 @@ class HealthConfig(BaseModel):
 
 
 class RoutingConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     strategy: Literal["round_robin"] = "round_robin"
 
 
 class SecurityConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     reject_unknown_api_keys: bool = False
 
 
 class UpstreamConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(min_length=1)
     base_url: HttpUrl
     models: list[str] = Field(min_length=1)
@@ -56,6 +68,8 @@ class UpstreamConfig(BaseModel):
 
 
 class DepartmentConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     api_keys: list[str] = Field(min_length=1)
 
     @model_validator(mode="after")
