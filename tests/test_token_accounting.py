@@ -105,3 +105,77 @@ def test_chat_completions_zero_usage_records_accounting_without_incrementing_tok
     )
     assert 'gateway_prompt_tokens_total{department="dept-a",model_name="shared-model"}' not in metrics_text
     assert 'gateway_generation_tokens_total{department="dept-a",model_name="shared-model"}' not in metrics_text
+
+
+def test_chat_completions_non_2xx_usage_does_not_record_token_counters(
+    app_client,
+    install_fake_async_client,
+) -> None:
+    install_fake_async_client(
+        app_client=app_client,
+        response=FakeUpstreamResponse(
+            status_code=429,
+            payload={
+                "error": {"message": "rate limited"},
+                "usage": {"prompt_tokens": 11, "completion_tokens": 13},
+            },
+        ),
+    )
+
+    response = app_client.post(
+        "/v1/chat/completions",
+        headers={"x-api-key": "key-dept-a"},
+        json={
+            "model": "shared-model",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    assert response.status_code == 429
+
+    metrics_text = app_client.get("/metrics").text
+
+    assert (
+        'gateway_token_accounting_total{accounting_status="missing_usage",endpoint="chat_completions"} 1.0'
+        in metrics_text
+    )
+    assert 'gateway_prompt_tokens_total{department="dept-a",model_name="shared-model"}' not in metrics_text
+    assert 'gateway_generation_tokens_total{department="dept-a",model_name="shared-model"}' not in metrics_text
+
+
+def test_responses_streaming_non_2xx_usage_does_not_record_token_counters(
+    app_client,
+    install_fake_async_client,
+) -> None:
+    install_fake_async_client(
+        app_client=app_client,
+        stream_response=FakeUpstreamResponse(
+            status_code=500,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                b'data: {"error":{"message":"upstream failed"},"usage":{"input_tokens":5,"output_tokens":8}}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        ),
+    )
+
+    with app_client.stream(
+        "POST",
+        "/v1/responses",
+        headers={"x-api-key": "key-dept-b"},
+        json={
+            "model": "model-b",
+            "input": "hello",
+            "stream": True,
+        },
+    ) as response:
+        body = b"".join(response.iter_bytes())
+
+    assert response.status_code == 500
+    assert b'"input_tokens":5' in body
+
+    metrics_text = app_client.get("/metrics").text
+
+    assert 'gateway_token_accounting_total{accounting_status="missing_usage",endpoint="responses"} 1.0' in metrics_text
+    assert 'gateway_prompt_tokens_total{department="dept-b",model_name="model-b"}' not in metrics_text
+    assert 'gateway_generation_tokens_total{department="dept-b",model_name="model-b"}' not in metrics_text

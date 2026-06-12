@@ -54,8 +54,13 @@ def _record_usage(
     department: str,
     endpoint_name: str,
     model_name: str,
+    upstream_status_code: int,
     usage: tuple[int, int] | None,
 ) -> None:
+    if not 200 <= upstream_status_code < 300:
+        metrics.record_token_accounting(endpoint=endpoint_name, accounting_status="missing_usage")
+        return
+
     if usage is None:
         metrics.record_token_accounting(endpoint=endpoint_name, accounting_status="missing_usage")
         return
@@ -355,6 +360,7 @@ async def _proxy_streaming_response(
                 department=department,
                 endpoint_name=endpoint_name,
                 model_name=model_name,
+                upstream_status_code=upstream_response.status_code,
                 usage=latest_usage,
             )
             _record_request(
@@ -494,6 +500,7 @@ async def proxy_json_endpoint(
         department=department,
         endpoint_name=endpoint_name,
         model_name=model_name,
+        upstream_status_code=upstream_response.status_code,
         usage=usage_extractor(response_payload),
     )
 
