@@ -61,96 +61,64 @@ Current state includes tests for:
 - token accounting
 - streaming pass-through behavior
 
-## Fix Now
+## Completed Fix Now
 
-### upstream health is still a stub
-
-Current state:
-
-- upstream health defaults to in-memory `True`
-- there is no active health polling
-- there is no passive health downgrade on repeated failure
-
-Why it matters:
-
-- `/v1/models` can report stale availability
-- routing can continue sending traffic to broken upstreams
-- `NoHealthyUpstreamError` is not meaningful under real failure conditions
-
-Recommended direction:
-
-- add a real upstream health policy
-- let routing and model discovery reflect actual health state
-
-### each request creates a new `httpx.AsyncClient`
+### upstream health is no longer a stub
 
 Current state:
 
-- non-streaming path creates a fresh client per request
-- streaming path also creates a fresh client per request
+- active upstream health polling exists
+- routing health state can be updated from real probe results
+- `/v1/models` can reflect health-derived availability
 
-Why it matters:
+Result:
 
-- no shared connection pool
-- extra TCP/TLS overhead
-- throughput and latency degrade under concurrency
+- stale all-healthy reporting is no longer the default behavior
 
-Recommended direction:
-
-- create one shared async client in lifespan
-- store it in `app.state`
-- close it on shutdown
-
-### token accounting is not gated on 2xx upstream success
+### request-path proxying no longer creates a fresh `httpx.AsyncClient`
 
 Current state:
 
-- token recording depends on `usage`
-- it does not first require a successful upstream status
+- shared upstream HTTP clients are created in app lifespan
+- request paths reuse those clients through dependency injection
 
-Why it matters:
+Result:
 
-- non-2xx responses with partial usage can violate conservative accounting semantics
+- connection pooling and keep-alive reuse are part of the current baseline
 
-Recommended direction:
-
-- record prompt/generation tokens only for 2xx responses
-
-### header forwarding is too permissive
+### token accounting is gated on upstream `2xx` success
 
 Current state:
 
-- request header forwarding uses a small blacklist
-- downstream response filtering only strips a few hop-by-hop headers
+- prompt and generation tokens are recorded only for successful upstream `2xx` responses
+- non-2xx responses with `usage` fall back to conservative accounting behavior
 
-Why it matters:
+Result:
 
-- RFC hop-by-hop behavior is not handled rigorously
-- encoding or cookie behavior can become brittle
-- per-upstream auth injection has no clear extension point
+- partial or error responses no longer violate the conservative token contract
 
-Recommended direction:
-
-- move toward a whitelist-based forwarding policy
-- strip hop-by-hop headers explicitly
-- design per-upstream auth injection
-
-### unknown key behavior is not productized
+### header forwarding is tightened
 
 Current state:
 
-- unknown or missing API keys fall through to `department="unknown"`
-- request proxying still succeeds
+- request forwarding now uses a bounded allowlist plus explicit blocked headers
+- hop-by-hop headers are stripped explicitly
+- response forwarding also strips unsafe downstream headers such as hop-by-hop fields and `content-encoding`
 
-Why it matters:
+Result:
 
-- acceptable for an internal attribution layer
-- unsafe if the gateway becomes an external ingress boundary
+- proxy header behavior is materially safer and more predictable than the original blacklist-only approach
 
-Recommended direction:
+### unknown key behavior is now productized
 
-- make this an explicit product/security decision
-- add a configurable `reject_unknown_keys` mode if the gateway is used as an auth boundary
+Current state:
+
+- default MVP behavior still attributes missing or unmapped keys to `department="unknown"`
+- deployments can enable `security.reject_unknown_api_keys=true` to reject unknown callers at the ingress boundary
+
+Result:
+
+- this is now an explicit product/security choice instead of accidental fallback behavior
 
 ## Next Hardening Batch
 

@@ -168,6 +168,18 @@ For failed or incomplete requests:
 
 - request error metrics should be recorded
 - token metrics should not be recorded by default for timeout, cancellation, or upstream error paths unless reliable usage semantics are introduced later
+- token metrics are recorded only for upstream `2xx` responses with reliable usage
+
+## Proxy Header Policy
+
+Header forwarding should stay conservative.
+
+For the current gateway:
+
+- request forwarding keeps a bounded allowlist of useful client headers
+- `authorization`, `x-api-key`, `cookie`, `accept-encoding`, and hop-by-hop headers are not forwarded upstream
+- downstream hop-by-hop headers are stripped before returning the response
+- `content-encoding` is also stripped from downstream proxy responses to avoid mismatches after client-side decoding
 
 ## Configuration Model
 
