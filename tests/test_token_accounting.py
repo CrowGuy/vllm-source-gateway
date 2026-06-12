@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 
-from tests.conftest import FakeUpstreamResponse
+from conftest import FakeUpstreamResponse
 
 
 def test_chat_completions_records_parse_error_and_returns_raw_body(

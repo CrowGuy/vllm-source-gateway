@@ -134,7 +134,7 @@ def _parse_json_payload(
             department=department,
             endpoint=endpoint_name,
             method=method,
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             started_at=started_at,
             detail="missing model",
         )

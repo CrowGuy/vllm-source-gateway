@@ -3,13 +3,22 @@ from __future__ import annotations
 import copy
 import json
 import sys
+import warnings
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
-from fastapi.testclient import TestClient
+from starlette.exceptions import StarletteDeprecationWarning
+
+with warnings.catch_warnings():
+    warnings.filterwarnings(
+        "ignore",
+        message=r"Using `httpx` with `starlette\.testclient` is deprecated; install `httpx2` instead\.",
+        category=StarletteDeprecationWarning,
+    )
+    from fastapi.testclient import TestClient
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

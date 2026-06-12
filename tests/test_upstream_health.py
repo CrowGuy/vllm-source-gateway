@@ -29,8 +29,12 @@ class FakeHealthAsyncClient:
         self._recorder["closed"] = True
 
 
-async def test_upstream_health_monitor_marks_upstreams_healthy_and_unhealthy(monkeypatch, sample_config_dict) -> None:
-    config = AppConfig.model_validate(sample_config_dict)
+async def test_upstream_health_monitor_marks_upstreams_healthy_and_unhealthy(
+    monkeypatch,
+    sample_config_copy,
+) -> None:
+    sample_config_copy["health"]["enabled"] = True
+    config = AppConfig.model_validate(sample_config_copy)
     registry = RoutingRegistry.from_config(config)
     recorder: dict[str, object] = {}
     responses_by_url = {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 
-from tests.conftest import FakeStreamingUpstreamResponse, FakeUpstreamResponse
+from conftest import FakeStreamingUpstreamResponse, FakeUpstreamResponse
 
 
 def test_chat_completions_proxies_success_and_records_usage(

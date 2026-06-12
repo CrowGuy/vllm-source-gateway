@@ -7,7 +7,7 @@ from vllm_source_gateway.dependencies import (
     resolve_department_for_api_key,
 )
 
-from tests.conftest import FakeUpstreamResponse
+from conftest import FakeUpstreamResponse
 
 
 def test_extract_api_key_prefers_x_api_key_over_authorization() -> None:
