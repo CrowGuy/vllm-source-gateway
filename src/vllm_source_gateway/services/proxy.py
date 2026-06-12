@@ -194,6 +194,33 @@ def _parse_json_payload(
     return payload, model_name
 
 
+def _enforce_source_resolution_policy(
+    *,
+    config: AppConfig,
+    source_resolution: SourceResolutionResult,
+    metrics: GatewayMetrics,
+    endpoint_name: str,
+    method: str,
+    started_at: float,
+) -> None:
+    if not config.security.reject_unknown_api_keys:
+        return
+
+    if source_resolution.resolution_source != "unknown":
+        return
+
+    detail = "missing api key" if source_resolution.api_key is None else "unknown api key"
+    raise _raise_http_error(
+        metrics=metrics,
+        department=source_resolution.department,
+        endpoint=endpoint_name,
+        method=method,
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        started_at=started_at,
+        detail=detail,
+    )
+
+
 def _select_upstream(
     *,
     routing_registry: RoutingRegistry,
@@ -446,6 +473,14 @@ async def proxy_json_endpoint(
     metrics.record_source_resolution(
         department=department,
         resolution_source=source_resolution.resolution_source,
+    )
+    _enforce_source_resolution_policy(
+        config=config,
+        source_resolution=source_resolution,
+        metrics=metrics,
+        endpoint_name=endpoint_name,
+        method=method,
+        started_at=started_at,
     )
 
     try:

@@ -37,6 +37,10 @@ class RoutingConfig(BaseModel):
     strategy: Literal["round_robin"] = "round_robin"
 
 
+class SecurityConfig(BaseModel):
+    reject_unknown_api_keys: bool = False
+
+
 class UpstreamConfig(BaseModel):
     name: str = Field(min_length=1)
     base_url: HttpUrl
@@ -70,6 +74,7 @@ class AppConfig(BaseModel):
     timeouts: TimeoutsConfig
     health: HealthConfig = Field(default_factory=HealthConfig)
     routing: RoutingConfig
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
     upstreams: list[UpstreamConfig] = Field(min_length=1)
     departments: dict[str, DepartmentConfig] = Field(min_length=1)
 

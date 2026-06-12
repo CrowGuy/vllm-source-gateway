@@ -7,7 +7,7 @@ from vllm_source_gateway.dependencies import (
     resolve_department_for_api_key,
 )
 
-from conftest import FakeUpstreamResponse
+from conftest import FakeUpstreamResponse, TestClient
 
 
 def test_extract_api_key_prefers_x_api_key_over_authorization() -> None:
@@ -99,3 +99,84 @@ def test_chat_completions_records_unknown_source_resolution_for_unmapped_key(
         'gateway_generation_tokens_total{department="unknown",model_name="shared-model"} 5.0'
         in metrics_text
     )
+
+
+def test_chat_completions_rejects_unmapped_key_when_strict_mode_enabled(
+    sample_config_copy,
+    write_config,
+    install_fake_async_client,
+) -> None:
+    from vllm_source_gateway.main import create_app
+
+    sample_config_copy["security"]["reject_unknown_api_keys"] = True
+    config_path = write_config(sample_config_copy, filename="strict-unknown-keys.yaml")
+
+    with TestClient(create_app(config_path=config_path)) as app_client:
+        install_fake_async_client(
+            app_client=app_client,
+            response=FakeUpstreamResponse(
+                payload={
+                    "id": "chatcmpl-should-not-proxy",
+                    "object": "chat.completion",
+                    "choices": [{"index": 0, "message": {"role": "assistant", "content": "hello"}}],
+                    "usage": {"prompt_tokens": 3, "completion_tokens": 5},
+                }
+            ),
+        )
+
+        response = app_client.post(
+            "/v1/chat/completions",
+            headers={"x-api-key": "unmapped-key"},
+            json={
+                "model": "shared-model",
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+        )
+
+        assert response.status_code == 401
+        assert response.json() == {"detail": "unknown api key"}
+
+        metrics_text = app_client.get("/metrics").text
+
+        assert (
+            'gateway_source_resolution_total{department="unknown",resolution_source="unknown"} 1.0'
+            in metrics_text
+        )
+        assert (
+            'gateway_http_requests_total{department="unknown",endpoint="chat_completions",method="POST",status_class="4xx"} 1.0'
+            in metrics_text
+        )
+        assert 'gateway_prompt_tokens_total{department="unknown",model_name="shared-model"}' not in metrics_text
+
+
+def test_chat_completions_rejects_missing_key_when_strict_mode_enabled(
+    sample_config_copy,
+    write_config,
+) -> None:
+    from vllm_source_gateway.main import create_app
+
+    sample_config_copy["security"]["reject_unknown_api_keys"] = True
+    config_path = write_config(sample_config_copy, filename="strict-missing-key.yaml")
+
+    with TestClient(create_app(config_path=config_path)) as app_client:
+        response = app_client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "shared-model",
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+        )
+
+        assert response.status_code == 401
+        assert response.json() == {"detail": "missing api key"}
+
+        metrics_text = app_client.get("/metrics").text
+
+        assert (
+            'gateway_source_resolution_total{department="unknown",resolution_source="unknown"} 1.0'
+            in metrics_text
+        )
+        assert (
+            'gateway_http_requests_total{department="unknown",endpoint="chat_completions",method="POST",status_class="4xx"} 1.0'
+            in metrics_text
+        )

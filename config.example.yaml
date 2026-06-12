@@ -16,6 +16,9 @@ health:
 routing:
   strategy: "round_robin"
 
+security:
+  reject_unknown_api_keys: false
+
 upstreams:
   - name: "gpt-oss-120b-a"
     base_url: "http://10.0.0.11:8000"

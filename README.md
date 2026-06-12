@@ -139,6 +139,8 @@ Design rules:
 - API key is the primary source identity for MVP
 - department names must be bounded, stable, and configuration-driven
 - raw IP is not part of the metrics contract
+- default behavior is to allow unknown or missing keys and attribute them to `department="unknown"`
+- deployments that use the gateway as an ingress auth boundary may enable `security.reject_unknown_api_keys=true`
 
 Deferred design:
 
@@ -177,6 +179,7 @@ Configuration areas should include:
 - `timeouts`
 - `health`
 - `routing`
+- `security`
 - `upstreams`
 - `departments`
 
@@ -339,6 +342,9 @@ Do not expose these as Prometheus labels for the contract consumed by the observ
 ## Example Department Mapping
 
 ```yaml
+security:
+  reject_unknown_api_keys: false
+
 departments:
   finance:
     api_keys:

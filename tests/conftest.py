@@ -49,6 +49,9 @@ def sample_config_dict() -> dict[str, object]:
         "routing": {
             "strategy": "round_robin",
         },
+        "security": {
+            "reject_unknown_api_keys": False,
+        },
         "upstreams": [
             {
                 "name": "gpu-a",
