@@ -1,0 +1,22 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+timeouts:
+  connect_seconds: 5
+  upstream_request_seconds: 120
+  stream_idle_seconds: 30
+
+routing:
+  strategy: "round_robin"
+
+upstreams:
+  - name: "gemma4-a"
+    base_url: "http://10.0.0.1:8000"
+    models:
+      - "gemma-4-31b"
+
+departments:
+  validation:
+    api_keys:
+      - "validation-key"

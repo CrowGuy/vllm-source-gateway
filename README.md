@@ -184,6 +184,67 @@ Deferred:
 - trusted proxy configuration
 - CIDR fallback configuration
 
+## Local Development
+
+Recommended local development uses `uv` with Python 3.11 or newer.
+
+### Prerequisites
+
+- Python 3.11+
+- `uv`
+
+### Environment Setup
+
+Create and activate a virtual environment:
+
+```bash
+uv venv
+source .venv/bin/activate
+```
+
+Install runtime dependencies:
+
+```bash
+uv sync
+```
+
+Install development dependencies when you want pytest or lint tooling:
+
+```bash
+uv sync --extra dev
+```
+
+### Start the Gateway
+
+Set the config path:
+
+```bash
+export VLLM_SOURCE_GATEWAY_CONFIG=./config.example.yaml
+```
+
+Start the gateway:
+
+```bash
+python -m uvicorn vllm_source_gateway.main:app --host 0.0.0.0 --port 8080
+```
+
+### Basic Smoke Checks
+
+Health:
+
+```bash
+curl http://127.0.0.1:8080/healthz
+```
+
+Metrics:
+
+```bash
+curl http://127.0.0.1:8080/metrics
+```
+
+For one real-upstream validation flow using `gemma-4-31b`, see
+[docs/e2e-validation-gemma4.md](/home/randy/Documents/crow/vllm-source-gateway/docs/e2e-validation-gemma4.md).
+
 ## Interop Contract with `vllm-usage-observability`
 
 This repo must expose raw metrics that the observability repo can consume as stable inputs.
@@ -350,6 +411,9 @@ The MVP is successful when:
 4. one department using multiple IPs still appears as one department in Prometheus metrics
 5. the observability repo can derive department-level request, token, error-rate, and latency views from the emitted metrics
 6. `department="unknown"` is visible and explainable
+
+One successful real-upstream validation record is documented in
+[docs/e2e-validation-gemma4.md](/home/randy/Documents/crow/vllm-source-gateway/docs/e2e-validation-gemma4.md).
 
 ## Operational Risks
 
