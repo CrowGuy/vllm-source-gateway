@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 
-from conftest import FakeStreamingUpstreamResponse, FakeUpstreamResponse
+from conftest import FakeStreamingUpstreamResponse, FakeUpstreamResponse, TestClient
 
 
 def test_chat_completions_proxies_success_and_records_usage(
@@ -151,3 +151,37 @@ def test_chat_completions_streams_sse_and_records_usage(
         'gateway_token_accounting_total{accounting_status="recorded",endpoint="chat_completions"} 1.0'
         in metrics_text
     )
+
+
+def test_chat_completions_unexpected_500_is_recorded_by_metrics_middleware(
+    sample_config_path,
+    install_fake_async_client,
+) -> None:
+    from vllm_source_gateway.main import create_app
+
+    with TestClient(
+        create_app(config_path=sample_config_path),
+        raise_server_exceptions=False,
+    ) as app_client:
+        install_fake_async_client(
+            app_client=app_client,
+            exception=RuntimeError("unexpected failure"),
+        )
+
+        response = app_client.post(
+            "/v1/chat/completions",
+            headers={"x-api-key": "key-dept-a"},
+            json={
+                "model": "shared-model",
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+        )
+
+        assert response.status_code == 500
+
+        metrics_text = app_client.get("/metrics").text
+
+        assert (
+            'gateway_http_requests_total{department="dept-a",endpoint="chat_completions",method="POST",status_class="5xx"} 1.0'
+            in metrics_text
+        )

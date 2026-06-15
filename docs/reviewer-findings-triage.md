@@ -143,15 +143,19 @@ Result:
 
 - operational checks can now distinguish "process is up" from "gateway currently has healthy upstream capacity"
 
+### request metrics are middleware-based
+
+Current state:
+
+- request metric finalization is centralized in middleware
+- proxy code still records source resolution and token accounting, but no longer owns the primary request counter and duration lifecycle
+- unexpected gateway exceptions can now be counted as request failures without needing route-local metrics wiring
+
+Result:
+
+- request metrics are less brittle and less dependent on every proxy branch remembering to call the counter manually
+
 ## Next Hardening Batch
-
-### add middleware-based request metrics
-
-Why:
-
-- reduces manual metrics wiring
-- protects against uncounted unexpected 500s
-- centralizes duration and status accounting
 
 ### add request body size limits
 

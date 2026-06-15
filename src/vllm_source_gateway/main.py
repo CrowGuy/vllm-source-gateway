@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from vllm_source_gateway.config import (
@@ -15,6 +16,11 @@ from vllm_source_gateway.config import (
     load_config,
 )
 from vllm_source_gateway.metrics import GatewayMetrics
+from vllm_source_gateway.request_metrics import (
+    finalize_request_metrics,
+    initialize_request_metrics_state,
+    set_request_metrics_status_override,
+)
 from vllm_source_gateway.routers.chat_completions import router as chat_completions_router
 from vllm_source_gateway.routers.health import router as health_router
 from vllm_source_gateway.routers.models import router as models_router
@@ -96,6 +102,36 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    @app.middleware("http")
+    async def request_metrics_middleware(request: Request, call_next):
+        initialize_request_metrics_state(request)
+
+        try:
+            response = await call_next(request)
+        except Exception:
+            finalize_request_metrics(request, default_status_code=500)
+            raise
+
+        if isinstance(response, StreamingResponse):
+            original_body_iterator = response.body_iterator
+
+            async def _wrap_streaming_body() -> AsyncIterator[bytes]:
+                try:
+                    async for chunk in original_body_iterator:
+                        yield chunk
+                except Exception:
+                    set_request_metrics_status_override(request, status_code=500)
+                    raise
+                finally:
+                    finalize_request_metrics(request, default_status_code=response.status_code)
+
+            response.body_iterator = _wrap_streaming_body()
+            return response
+
+        finalize_request_metrics(request, default_status_code=response.status_code)
+        return response
+
     app.include_router(health_router)
     app.include_router(models_router)
     app.include_router(chat_completions_router)
