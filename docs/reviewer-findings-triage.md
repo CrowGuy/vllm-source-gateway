@@ -203,13 +203,6 @@ Result:
 
 ## Next Hardening Batch
 
-### revisit round-robin behavior when health state changes
-
-Why:
-
-- current selection rotates over the filtered healthy list
-- distribution can skew when health membership changes frequently
-
 ### distinguish gateway-origin vs upstream-origin failures in metrics
 
 Why:

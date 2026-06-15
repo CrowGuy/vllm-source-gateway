@@ -51,3 +51,22 @@ def test_routing_registry_raises_for_unknown_model(sample_config_dict) -> None:
 
     with pytest.raises(UnknownModelError, match="unknown model 'missing-model'"):
         registry.select_upstream("missing-model")
+
+
+def test_routing_registry_preserves_round_robin_order_when_health_changes(sample_config_copy) -> None:
+    sample_config_copy["upstreams"].append(
+        {
+            "name": "gpu-c",
+            "base_url": "http://10.0.0.3:8000",
+            "models": ["shared-model"],
+        }
+    )
+    config = AppConfig.model_validate(sample_config_copy)
+    registry = RoutingRegistry.from_config(config)
+
+    initial_selections = [registry.select_upstream("shared-model").upstream.name for _ in range(2)]
+    registry.set_upstream_health("gpu-b", healthy=False)
+    selection_after_health_change = registry.select_upstream("shared-model")
+
+    assert initial_selections == ["gpu-a", "gpu-b"]
+    assert selection_after_health_change.upstream.name == "gpu-c"

@@ -96,17 +96,26 @@ class RoutingRegistry:
             if upstreams is None:
                 raise UnknownModelError(f"unknown model '{model_name}'")
 
-            healthy_upstreams = [
-                upstream for upstream in upstreams if self._health_by_name.get(upstream.name, False)
-            ]
-            if not healthy_upstreams:
-                raise NoHealthyUpstreamError(f"no healthy upstream available for model '{model_name}'")
-
             if self.strategy != "round_robin":
                 raise RoutingError(f"unsupported routing strategy '{self.strategy}'")
 
-            index = self._round_robin_index[model_name] % len(healthy_upstreams)
-            selected = healthy_upstreams[index]
-            self._round_robin_index[model_name] = (index + 1) % len(healthy_upstreams)
+            pool_size = len(upstreams)
+            start_index = self._round_robin_index[model_name] % pool_size
+
+            selected = None
+            selected_index = None
+            for offset in range(pool_size):
+                candidate_index = (start_index + offset) % pool_size
+                candidate = upstreams[candidate_index]
+                if not self._health_by_name.get(candidate.name, False):
+                    continue
+                selected = candidate
+                selected_index = candidate_index
+                break
+
+            if selected is None or selected_index is None:
+                raise NoHealthyUpstreamError(f"no healthy upstream available for model '{model_name}'")
+
+            self._round_robin_index[model_name] = (selected_index + 1) % pool_size
 
             return SelectedUpstream(model_name=model_name, upstream=selected)
