@@ -79,6 +79,8 @@ def build_access_log_fields(
 
     if snapshot.department is not None:
         fields["department"] = snapshot.department
+    if snapshot.failure_origin is not None:
+        fields["failure_origin"] = snapshot.failure_origin
 
     request_id = request.headers.get("x-request-id")
     if request_id is not None:

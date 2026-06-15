@@ -43,6 +43,12 @@ class GatewayMetrics:
             buckets=REQUEST_DURATION_BUCKETS,
             registry=self.registry,
         )
+        self.http_request_failures_total = Counter(
+            "gateway_http_request_failures_total",
+            "Handled HTTP failures by department, endpoint, and failure origin.",
+            labelnames=("department", "endpoint", "method", "status_class", "failure_origin"),
+            registry=self.registry,
+        )
         self.prompt_tokens_total = Counter(
             "gateway_prompt_tokens_total",
             "Prompt tokens recorded for completed requests with reliable usage.",
@@ -89,6 +95,27 @@ class GatewayMetrics:
             endpoint=endpoint,
             method=method.upper(),
         ).observe(duration_seconds)
+
+    def record_request_failure(
+        self,
+        *,
+        department: str,
+        endpoint: str,
+        method: str,
+        status_code: int,
+        failure_origin: str,
+    ) -> None:
+        if status_code < 400:
+            return
+
+        status_class = _status_class(status_code)
+        self.http_request_failures_total.labels(
+            department=department,
+            endpoint=endpoint,
+            method=method.upper(),
+            status_class=status_class,
+            failure_origin=failure_origin,
+        ).inc()
 
     def record_prompt_tokens(self, *, department: str, model_name: str, prompt_tokens: int) -> None:
         if prompt_tokens <= 0:

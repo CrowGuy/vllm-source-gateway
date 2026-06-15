@@ -13,6 +13,7 @@ from vllm_source_gateway.config import AppConfig
 from vllm_source_gateway.dependencies import SourceResolutionResult
 from vllm_source_gateway.metrics import GatewayMetrics
 from vllm_source_gateway.request_metrics import (
+    set_request_metrics_failure_origin,
     set_request_metrics_context,
     set_request_metrics_status_override,
 )
@@ -365,6 +366,9 @@ async def _proxy_streaming_response(
             accounting_status="missing_usage",
         ) from exc
 
+    if upstream_response.status_code >= 400:
+        set_request_metrics_failure_origin(request, failure_origin="upstream")
+
     async def _stream_bytes():
         latest_usage: tuple[int, int] | None = None
         decode_buffer = ""
@@ -417,6 +421,7 @@ async def _proxy_streaming_response(
 
             if client_disconnected:
                 set_request_metrics_status_override(request, status_code=_CLIENT_DISCONNECTED_STATUS)
+                set_request_metrics_failure_origin(request, failure_origin="gateway")
                 metrics.record_token_accounting(
                     endpoint=endpoint_name,
                     accounting_status="missing_usage",
@@ -425,6 +430,7 @@ async def _proxy_streaming_response(
 
             if stream_failed:
                 set_request_metrics_status_override(request, status_code=status.HTTP_502_BAD_GATEWAY)
+                set_request_metrics_failure_origin(request, failure_origin="gateway")
                 metrics.record_token_accounting(
                     endpoint=endpoint_name,
                     accounting_status="missing_usage",
@@ -533,6 +539,9 @@ async def proxy_json_endpoint(
             detail="upstream request failed",
             accounting_status="missing_usage",
         ) from exc
+
+    if upstream_response.status_code >= 400:
+        set_request_metrics_failure_origin(request, failure_origin="upstream")
 
     try:
         response_payload = upstream_response.json()

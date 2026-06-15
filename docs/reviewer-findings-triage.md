@@ -203,12 +203,18 @@ Result:
 
 ## Next Hardening Batch
 
-### distinguish gateway-origin vs upstream-origin failures in metrics
+### gateway-origin and upstream-origin failures are distinguished
 
-Why:
+Current state:
 
-- current request counters flatten both into the same status-class view
-- later observability will likely want to distinguish them
+- the base request counter remains unchanged for compatibility
+- `gateway_http_request_failures_total` adds a bounded `failure_origin` label for `4xx` and `5xx`
+- gateway-synthesized failures are recorded as `failure_origin="gateway"`
+- upstream non-2xx responses that are passed through are recorded as `failure_origin="upstream"`
+
+Result:
+
+- dashboards and alerts can now separate gateway failures from upstream failures without losing the existing request contract
 
 ### define production secret handling
 

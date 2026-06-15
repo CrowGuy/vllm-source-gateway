@@ -309,6 +309,23 @@ Semantic rules:
 - measure end-to-end gateway handling time including upstream proxying
 - use LLM-oriented buckets spanning `0.1s` through `300s`
 
+#### `gateway_http_request_failures_total`
+
+Labels emitted by this repo:
+
+- `department`
+- `endpoint`
+- `method`
+- `status_class`
+- `failure_origin`
+
+Semantic rules:
+
+- increment only for request outcomes with HTTP `4xx` or `5xx`
+- `failure_origin="gateway"` means the gateway synthesized the failure response
+- `failure_origin="upstream"` means the upstream returned a non-2xx response that the gateway passed through
+- keep `failure_origin` bounded to `gateway` or `upstream`
+
 #### `gateway_prompt_tokens_total`
 
 Labels emitted by this repo:

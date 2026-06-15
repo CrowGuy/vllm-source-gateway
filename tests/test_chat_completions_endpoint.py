@@ -110,6 +110,40 @@ def test_chat_completions_returns_504_on_upstream_timeout(
         in metrics_text
     )
     assert 'gateway_http_requests_total{department="dept-a",endpoint="chat_completions",method="POST",status_class="5xx"} 1.0' in metrics_text
+    assert (
+        'gateway_http_request_failures_total{department="dept-a",endpoint="chat_completions",failure_origin="gateway",method="POST",status_class="5xx"} 1.0'
+        in metrics_text
+    )
+
+
+def test_chat_completions_tracks_upstream_origin_failures(
+    app_client,
+    install_fake_async_client,
+) -> None:
+    install_fake_async_client(
+        app_client=app_client,
+        response=FakeUpstreamResponse(
+            status_code=503,
+            payload={"error": {"message": "model overloaded"}},
+        ),
+    )
+
+    response = app_client.post(
+        "/v1/chat/completions",
+        headers={"x-api-key": "key-dept-a"},
+        json={
+            "model": "shared-model",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    assert response.status_code == 503
+
+    metrics_text = app_client.get("/metrics").text
+    assert (
+        'gateway_http_request_failures_total{department="dept-a",endpoint="chat_completions",failure_origin="upstream",method="POST",status_class="5xx"} 1.0'
+        in metrics_text
+    )
 
 
 def test_chat_completions_streams_sse_and_records_usage(

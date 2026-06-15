@@ -57,6 +57,7 @@ def test_build_access_log_fields_includes_request_context() -> None:
         method="POST",
         status_code=200,
         duration_seconds=0.1234567,
+        failure_origin=None,
     )
 
     fields = build_access_log_fields(request=request, snapshot=snapshot)

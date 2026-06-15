@@ -119,6 +119,11 @@ def test_responses_returns_422_when_model_is_missing(app_client) -> None:
 
     assert response.status_code == 422
     assert response.json() == {"detail": "missing model"}
+    metrics_text = app_client.get("/metrics").text
+    assert (
+        'gateway_http_request_failures_total{department="dept-b",endpoint="responses",failure_origin="gateway",method="POST",status_class="4xx"} 1.0'
+        in metrics_text
+    )
 
 
 def test_responses_streams_sse_and_tracks_missing_usage(
