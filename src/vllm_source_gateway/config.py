@@ -12,6 +12,7 @@ class ServerConfig(BaseModel):
 
     host: str = "0.0.0.0"
     port: int = Field(default=8080, ge=1, le=65535)
+    max_request_body_bytes: int = Field(default=4 * 1024 * 1024, gt=0)
 
 
 class TimeoutsConfig(BaseModel):

@@ -155,14 +155,41 @@ Result:
 
 - request metrics are less brittle and less dependent on every proxy branch remembering to call the counter manually
 
+### request body size limits are enforced
+
+Current state:
+
+- JSON proxy endpoints enforce `server.max_request_body_bytes`
+- oversized request bodies are rejected before JSON parsing with `413`
+- both `Content-Length` precheck and actual body-size enforcement exist
+
+Result:
+
+- oversized or malicious request bodies no longer flow straight into unbounded `request.json()` parsing
+
+### nested config models reject unknown fields
+
+Current state:
+
+- nested configuration models use `extra="forbid"`
+- typoed nested config keys now fail config validation instead of being ignored
+
+Result:
+
+- configuration mistakes are caught earlier and more consistently
+
+### API key lookup is precomputed
+
+Current state:
+
+- startup validation builds an `api_key -> department` reverse lookup map
+- request-path source resolution now uses direct lookup instead of scanning all departments
+
+Result:
+
+- source resolution is simpler and avoids unnecessary linear scans on the hot path
+
 ## Next Hardening Batch
-
-### add request body size limits
-
-Why:
-
-- current `request.json()` reads the full body into memory
-- large or malicious bodies can waste memory
 
 ### improve structured logging
 
@@ -170,20 +197,6 @@ Why:
 
 - current `logging.basicConfig` does not make good use of `extra=...`
 - request-level operational debugging is still weak
-
-### add `extra="forbid"` to nested config models
-
-Why:
-
-- typoed nested config fields can be silently ignored
-- this is a high-value correctness hardening change
-
-### precompute API key lookup
-
-Why:
-
-- current source resolution scans all departments linearly
-- current scale is small, but a reverse lookup map is simpler and cheaper
 
 ### revisit round-robin behavior when health state changes
 

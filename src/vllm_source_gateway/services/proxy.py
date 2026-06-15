@@ -132,6 +132,80 @@ def _build_downstream_headers(upstream_headers: httpx.Headers) -> dict[str, str]
     }
 
 
+def _request_body_too_large_error(
+    *,
+    metrics: GatewayMetrics,
+    endpoint_name: str,
+    max_request_body_bytes: int,
+) -> HTTPException:
+    return _raise_http_error(
+        metrics=metrics,
+        endpoint=endpoint_name,
+        status_code=413,
+        detail=(
+            "request body too large; "
+            f"max_request_body_bytes={max_request_body_bytes}"
+        ),
+    )
+
+
+def _content_length_exceeds_limit(request: Request, max_request_body_bytes: int) -> bool:
+    content_length = request.headers.get("content-length")
+    if content_length is None:
+        return False
+
+    try:
+        parsed_content_length = int(content_length)
+    except ValueError:
+        return False
+
+    return parsed_content_length > max_request_body_bytes
+
+
+async def _read_json_request_body(
+    *,
+    request: Request,
+    config: AppConfig,
+    metrics: GatewayMetrics,
+    endpoint_name: str,
+) -> Any:
+    max_request_body_bytes = config.server.max_request_body_bytes
+
+    if _content_length_exceeds_limit(request, max_request_body_bytes):
+        raise _request_body_too_large_error(
+            metrics=metrics,
+            endpoint_name=endpoint_name,
+            max_request_body_bytes=max_request_body_bytes,
+        )
+
+    try:
+        request_body = await request.body()
+    except Exception as exc:  # pragma: no cover - FastAPI request parsing edge
+        raise _raise_http_error(
+            metrics=metrics,
+            endpoint=endpoint_name,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid request body",
+        ) from exc
+
+    if len(request_body) > max_request_body_bytes:
+        raise _request_body_too_large_error(
+            metrics=metrics,
+            endpoint_name=endpoint_name,
+            max_request_body_bytes=max_request_body_bytes,
+        )
+
+    try:
+        return json.loads(request_body)
+    except ValueError as exc:
+        raise _raise_http_error(
+            metrics=metrics,
+            endpoint=endpoint_name,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid json body",
+        ) from exc
+
+
 def _parse_json_payload(
     *,
     payload: Any,
@@ -404,15 +478,12 @@ async def proxy_json_endpoint(
         endpoint_name=endpoint_name,
     )
 
-    try:
-        payload = await request.json()
-    except Exception as exc:  # pragma: no cover - FastAPI request parsing edge
-        raise _raise_http_error(
-            metrics=metrics,
-            endpoint=endpoint_name,
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="invalid json body",
-        ) from exc
+    payload = await _read_json_request_body(
+        request=request,
+        config=config,
+        metrics=metrics,
+        endpoint_name=endpoint_name,
+    )
 
     payload, model_name = _parse_json_payload(
         payload=payload,

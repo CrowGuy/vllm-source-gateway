@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import httpx
 
 from conftest import FakeStreamingUpstreamResponse, FakeUpstreamResponse, TestClient
@@ -183,5 +185,37 @@ def test_chat_completions_unexpected_500_is_recorded_by_metrics_middleware(
 
         assert (
             'gateway_http_requests_total{department="dept-a",endpoint="chat_completions",method="POST",status_class="5xx"} 1.0'
+            in metrics_text
+        )
+
+
+def test_chat_completions_returns_413_when_request_body_exceeds_limit(
+    sample_config_copy,
+    write_config,
+) -> None:
+    from vllm_source_gateway.main import create_app
+
+    sample_config_copy["server"]["max_request_body_bytes"] = 64
+    config_path = write_config(sample_config_copy, filename="small-body-limit.yaml")
+    payload = {
+        "model": "shared-model",
+        "messages": [{"role": "user", "content": "hello from an oversized payload"}],
+    }
+
+    with TestClient(create_app(config_path=config_path)) as app_client:
+        response = app_client.post(
+            "/v1/chat/completions",
+            headers={"x-api-key": "key-dept-a", "content-type": "application/json"},
+            content=json.dumps(payload).encode("utf-8"),
+        )
+
+        assert response.status_code == 413
+        assert response.json() == {
+            "detail": "request body too large; max_request_body_bytes=64"
+        }
+
+        metrics_text = app_client.get("/metrics").text
+        assert (
+            'gateway_http_requests_total{department="dept-a",endpoint="chat_completions",method="POST",status_class="4xx"} 1.0'
             in metrics_text
         )

@@ -10,6 +10,7 @@ def test_load_config_returns_validated_app_config(sample_config_path) -> None:
 
     assert config.server.host == "127.0.0.1"
     assert config.server.port == 8080
+    assert config.server.max_request_body_bytes == 4194304
     assert config.routing.strategy == "round_robin"
     assert config.model_names == ["model-a", "model-b", "shared-model"]
     assert config.departments["dept-a"].api_keys == ["key-dept-a"]

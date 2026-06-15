@@ -34,6 +34,7 @@ def sample_config_dict() -> dict[str, object]:
         "server": {
             "host": "127.0.0.1",
             "port": 8080,
+            "max_request_body_bytes": 4194304,
         },
         "timeouts": {
             "connect_seconds": 1.0,

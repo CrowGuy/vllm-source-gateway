@@ -195,6 +195,11 @@ Configuration areas should include:
 - `upstreams`
 - `departments`
 
+Current baseline:
+
+- `server.max_request_body_bytes` limits JSON proxy request bodies before parsing
+- requests larger than the configured limit are rejected with `413`
+
 Deferred:
 
 - trusted proxy configuration

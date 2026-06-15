@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
+
 import httpx
 
-from conftest import FakeStreamingUpstreamResponse, FakeUpstreamResponse
+from conftest import FakeStreamingUpstreamResponse, FakeUpstreamResponse, TestClient
 
 
 def test_responses_proxies_success_and_records_usage(
@@ -155,3 +157,35 @@ def test_responses_streams_sse_and_tracks_missing_usage(
     assert 'gateway_token_accounting_total{accounting_status="missing_usage",endpoint="responses"} 1.0' in metrics_text
     assert 'gateway_prompt_tokens_total{department="dept-b",model_name="model-b"}' not in metrics_text
     assert 'gateway_generation_tokens_total{department="dept-b",model_name="model-b"}' not in metrics_text
+
+
+def test_responses_returns_413_when_request_body_exceeds_limit(
+    sample_config_copy,
+    write_config,
+) -> None:
+    from vllm_source_gateway.main import create_app
+
+    sample_config_copy["server"]["max_request_body_bytes"] = 48
+    config_path = write_config(sample_config_copy, filename="small-body-limit.yaml")
+    payload = {
+        "model": "model-b",
+        "input": "hello from an oversized payload",
+    }
+
+    with TestClient(create_app(config_path=config_path)) as app_client:
+        response = app_client.post(
+            "/v1/responses",
+            headers={"x-api-key": "key-dept-b", "content-type": "application/json"},
+            content=json.dumps(payload).encode("utf-8"),
+        )
+
+        assert response.status_code == 413
+        assert response.json() == {
+            "detail": "request body too large; max_request_body_bytes=48"
+        }
+
+        metrics_text = app_client.get("/metrics").text
+        assert (
+            'gateway_http_requests_total{department="dept-b",endpoint="responses",method="POST",status_class="4xx"} 1.0'
+            in metrics_text
+        )
