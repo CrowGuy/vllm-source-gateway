@@ -120,6 +120,29 @@ Result:
 
 - this is now an explicit product/security choice instead of accidental fallback behavior
 
+### latency histogram buckets are customized for LLM request ranges
+
+Current state:
+
+- request duration histogram uses explicit buckets from `0.1s` through `300s`
+- the bucket range now covers common LLM latency distributions far better than the Prometheus default set
+
+Result:
+
+- `gateway_request_duration_seconds_bucket` is more useful for P95/P99-style latency analysis
+
+### liveness and readiness are split
+
+Current state:
+
+- `/livez` provides process-level liveness
+- `/readyz` reports readiness from current upstream health state
+- `/healthz` remains as a backward-compatible liveness alias
+
+Result:
+
+- operational checks can now distinguish "process is up" from "gateway currently has healthy upstream capacity"
+
 ## Next Hardening Batch
 
 ### add middleware-based request metrics
@@ -129,29 +152,6 @@ Why:
 - reduces manual metrics wiring
 - protects against uncounted unexpected 500s
 - centralizes duration and status accounting
-
-### customize latency histogram buckets
-
-Why:
-
-- default histogram buckets do not fit typical LLM latency ranges
-- 10s+ requests lose useful percentile resolution
-
-Suggested direction:
-
-- define buckets suitable for 0.1s through 120s or higher
-
-### split liveness and readiness
-
-Why:
-
-- current `/healthz` only proves the process is up
-- it does not express whether usable upstreams exist
-
-Recommended direction:
-
-- keep liveness simple
-- derive readiness from real upstream health state
 
 ### add request body size limits
 

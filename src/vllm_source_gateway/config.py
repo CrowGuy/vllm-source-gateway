@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, PrivateAttr, ValidationError, model_validator
 
 
 class ServerConfig(BaseModel):
@@ -83,6 +83,7 @@ class DepartmentConfig(BaseModel):
 
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    _api_key_to_department: dict[str, str] = PrivateAttr(default_factory=dict)
 
     server: ServerConfig
     timeouts: TimeoutsConfig
@@ -99,6 +100,7 @@ class AppConfig(BaseModel):
             raise ValueError("upstream names must be unique")
 
         seen_api_keys: set[str] = set()
+        api_key_to_department: dict[str, str] = {}
         for department, config in self.departments.items():
             normalized_department = department.strip()
             if not normalized_department:
@@ -108,6 +110,9 @@ class AppConfig(BaseModel):
                 if api_key in seen_api_keys:
                     raise ValueError(f"api key '{api_key}' is assigned to more than one department")
                 seen_api_keys.add(api_key)
+                api_key_to_department[api_key] = normalized_department
+
+        self._api_key_to_department = api_key_to_department
 
         return self
 
@@ -115,6 +120,10 @@ class AppConfig(BaseModel):
     def model_names(self) -> list[str]:
         names = {model_name for upstream in self.upstreams for model_name in upstream.models}
         return sorted(names)
+
+    @property
+    def api_key_to_department(self) -> dict[str, str]:
+        return self._api_key_to_department
 
 
 class ConfigError(RuntimeError):

@@ -3,6 +3,21 @@ from __future__ import annotations
 from prometheus_client import CollectorRegistry, Counter, Histogram
 
 
+REQUEST_DURATION_BUCKETS = (
+    0.1,
+    0.5,
+    1.0,
+    2.0,
+    5.0,
+    10.0,
+    20.0,
+    30.0,
+    60.0,
+    120.0,
+    300.0,
+)
+
+
 def _status_class(status_code: int) -> str:
     if 200 <= status_code < 300:
         return "2xx"
@@ -25,6 +40,7 @@ class GatewayMetrics:
             "gateway_request_duration_seconds",
             "End-to-end gateway handling duration in seconds.",
             labelnames=("department", "endpoint", "method"),
+            buckets=REQUEST_DURATION_BUCKETS,
             registry=self.registry,
         )
         self.prompt_tokens_total = Counter(
@@ -100,4 +116,3 @@ class GatewayMetrics:
             endpoint=endpoint,
             accounting_status=accounting_status,
         ).inc()
-

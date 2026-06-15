@@ -246,10 +246,16 @@ python -m uvicorn vllm_source_gateway.main:app --host 0.0.0.0 --port 8080
 
 ### Basic Smoke Checks
 
-Health:
+Liveness:
 
 ```bash
-curl http://127.0.0.1:8080/healthz
+curl http://127.0.0.1:8080/livez
+```
+
+Readiness:
+
+```bash
+curl http://127.0.0.1:8080/readyz
 ```
 
 Metrics:
@@ -260,6 +266,8 @@ curl http://127.0.0.1:8080/metrics
 
 For one real-upstream validation flow using `gemma-4-31b`, see
 [docs/e2e-validation-gemma4.md](/home/randy/Documents/crow/vllm-source-gateway/docs/e2e-validation-gemma4.md).
+
+`/healthz` remains available as a backward-compatible alias for liveness.
 
 ## Interop Contract with `vllm-usage-observability`
 
@@ -294,6 +302,7 @@ Labels emitted by this repo:
 Semantic rules:
 
 - measure end-to-end gateway handling time including upstream proxying
+- use LLM-oriented buckets spanning `0.1s` through `300s`
 
 #### `gateway_prompt_tokens_total`
 
@@ -404,7 +413,7 @@ The MVP should stay intentionally small.
 - source resolution from API key
 - department-level Prometheus metrics
 - basic timeout handling
-- health endpoint
+- liveness and readiness endpoints
 - configuration-driven department mapping
 
 ### Out of Scope

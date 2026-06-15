@@ -38,6 +38,15 @@ def test_resolve_department_for_api_key_returns_mapped_department(sample_config_
     assert result.resolution_source == "api_key"
 
 
+def test_app_config_precomputes_api_key_lookup(sample_config_dict) -> None:
+    config = AppConfig.model_validate(sample_config_dict)
+
+    assert config.api_key_to_department == {
+        "key-dept-a": "dept-a",
+        "key-dept-b": "dept-b",
+    }
+
+
 def test_resolve_department_for_api_key_returns_unknown_for_missing_key(sample_config_dict) -> None:
     config = AppConfig.model_validate(sample_config_dict)
 

@@ -84,13 +84,13 @@ def resolve_department_for_api_key(config: AppConfig, api_key: str | None) -> So
             resolution_source="unknown",
         )
 
-    for department, department_config in config.departments.items():
-        if api_key in department_config.api_keys:
-            return SourceResolutionResult(
-                department=department,
-                api_key=api_key,
-                resolution_source="api_key",
-            )
+    department = config.api_key_to_department.get(api_key)
+    if department is not None:
+        return SourceResolutionResult(
+            department=department,
+            api_key=api_key,
+            resolution_source="api_key",
+        )
 
     return SourceResolutionResult(
         department=UNKNOWN_DEPARTMENT,
