@@ -189,14 +189,19 @@ Result:
 
 - source resolution is simpler and avoids unnecessary linear scans on the hot path
 
+### structured logging is now materially useful
+
+Current state:
+
+- application logs use JSON formatting instead of plain text `basicConfig` output
+- request middleware emits a completion log with request method, path, endpoint, status, duration, and request or trace ids when present
+- existing startup and upstream health logs now preserve `extra={...}` fields in emitted output
+
+Result:
+
+- request-level operational debugging is much more practical without introducing a separate logging stack
+
 ## Next Hardening Batch
-
-### improve structured logging
-
-Why:
-
-- current `logging.basicConfig` does not make good use of `extra=...`
-- request-level operational debugging is still weak
 
 ### revisit round-robin behavior when health state changes
 

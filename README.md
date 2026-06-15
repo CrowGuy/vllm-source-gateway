@@ -390,6 +390,22 @@ departments:
 
 The gateway is an I/O-heavy service, not a GPU inference service.
 
+Logs are expected to be structured JSON lines.
+
+Operationally useful baseline fields include:
+
+- `message`
+- `logger`
+- `level`
+- `method`
+- `path`
+- `endpoint`
+- `department`
+- `status_code`
+- `duration_seconds`
+- `request_id` when present
+- `trace_id` when present
+
 For MVP planning:
 
 - GPU is not required

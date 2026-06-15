@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 
 from fastapi import Request
 
@@ -12,6 +13,15 @@ _REQUEST_RECORDED = "_gateway_request_metrics_recorded"
 _REQUEST_ENDPOINT = "_gateway_request_metrics_endpoint"
 _REQUEST_DEPARTMENT = "_gateway_request_metrics_department"
 _REQUEST_STATUS_CODE_OVERRIDE = "_gateway_request_metrics_status_code_override"
+
+
+@dataclass(frozen=True)
+class RequestMetricsSnapshot:
+    department: str | None
+    endpoint: str | None
+    method: str
+    status_code: int
+    duration_seconds: float
 
 
 def initialize_request_metrics_state(request: Request) -> None:
@@ -31,25 +41,50 @@ def set_request_metrics_status_override(request: Request, *, status_code: int) -
     request.state.__setattr__(_REQUEST_STATUS_CODE_OVERRIDE, status_code)
 
 
-def finalize_request_metrics(request: Request, *, default_status_code: int) -> None:
-    if getattr(request.state, _REQUEST_RECORDED, False):
-        return
-
+def build_request_metrics_snapshot(
+    request: Request,
+    *,
+    default_status_code: int,
+) -> RequestMetricsSnapshot | None:
     started_at = getattr(request.state, _REQUEST_STARTED_AT, None)
+    if started_at is None:
+        return None
+
     department = getattr(request.state, _REQUEST_DEPARTMENT, None)
     endpoint = getattr(request.state, _REQUEST_ENDPOINT, None)
-    if started_at is None or department is None or endpoint is None:
-        return
-
-    metrics: GatewayMetrics = request.app.state.metrics
     status_code_override = getattr(request.state, _REQUEST_STATUS_CODE_OVERRIDE, None)
     status_code = status_code_override if status_code_override is not None else default_status_code
 
-    metrics.observe_request(
+    return RequestMetricsSnapshot(
         department=department,
         endpoint=endpoint,
         method=request.method,
         status_code=status_code,
         duration_seconds=time.perf_counter() - started_at,
     )
+
+
+def finalize_request_metrics(
+    request: Request,
+    *,
+    default_status_code: int,
+) -> RequestMetricsSnapshot | None:
+    if getattr(request.state, _REQUEST_RECORDED, False):
+        return None
+
+    snapshot = build_request_metrics_snapshot(request, default_status_code=default_status_code)
+    if snapshot is None:
+        return None
+
+    if snapshot.department is not None and snapshot.endpoint is not None:
+        metrics: GatewayMetrics = request.app.state.metrics
+        metrics.observe_request(
+            department=snapshot.department,
+            endpoint=snapshot.endpoint,
+            method=snapshot.method,
+            status_code=snapshot.status_code,
+            duration_seconds=snapshot.duration_seconds,
+        )
+
     request.state.__setattr__(_REQUEST_RECORDED, True)
+    return snapshot

@@ -15,6 +15,7 @@ from vllm_source_gateway.config import (
     DEFAULT_CONFIG_ENV_VAR,
     load_config,
 )
+from vllm_source_gateway.logging_utils import configure_application_logging, log_request_completion
 from vllm_source_gateway.metrics import GatewayMetrics
 from vllm_source_gateway.request_metrics import (
     finalize_request_metrics,
@@ -29,11 +30,7 @@ from vllm_source_gateway.routing import RoutingRegistry
 from vllm_source_gateway.services.upstream_health import UpstreamHealthMonitor
 
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
-logger = logging.getLogger("vllm_source_gateway")
+logger = configure_application_logging(level=logging.INFO)
 
 
 UPSTREAM_CLIENT_LIMITS = httpx.Limits(
@@ -110,7 +107,8 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         try:
             response = await call_next(request)
         except Exception:
-            finalize_request_metrics(request, default_status_code=500)
+            snapshot = finalize_request_metrics(request, default_status_code=500)
+            log_request_completion(request=request, snapshot=snapshot)
             raise
 
         if isinstance(response, StreamingResponse):
@@ -124,12 +122,17 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
                     set_request_metrics_status_override(request, status_code=500)
                     raise
                 finally:
-                    finalize_request_metrics(request, default_status_code=response.status_code)
+                    snapshot = finalize_request_metrics(
+                        request,
+                        default_status_code=response.status_code,
+                    )
+                    log_request_completion(request=request, snapshot=snapshot)
 
             response.body_iterator = _wrap_streaming_body()
             return response
 
-        finalize_request_metrics(request, default_status_code=response.status_code)
+        snapshot = finalize_request_metrics(request, default_status_code=response.status_code)
+        log_request_completion(request=request, snapshot=snapshot)
         return response
 
     app.include_router(health_router)
