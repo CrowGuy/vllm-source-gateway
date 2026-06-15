@@ -216,12 +216,17 @@ Result:
 
 - dashboards and alerts can now separate gateway failures from upstream failures without losing the existing request contract
 
-### define production secret handling
+### production secret handling is defined
 
-Why:
+Current state:
 
-- example YAML keys are fine as examples
-- production deployments should support env or secret reference patterns
+- departments can use `api_keys_from_env` instead of inline `api_keys`
+- env-backed keys are resolved at startup and fail fast when missing or empty
+- the config model allows local inline keys for development while giving production a secret reference path
+
+Result:
+
+- production deployments no longer need to store real department API keys directly in repo-tracked YAML files
 
 ## Defer
 

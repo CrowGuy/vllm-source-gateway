@@ -38,14 +38,10 @@ upstreams:
 
 departments:
   finance:
-    api_keys:
-      - "finance-prod"
+    api_keys_from_env: "DEPT_FINANCE_API_KEYS"
 
   hr:
-    api_keys:
-      - "hr-app"
+    api_keys_from_env: "DEPT_HR_API_KEYS"
 
   data_platform:
-    api_keys:
-      - "dp-prod"
-      - "dp-batch"
+    api_keys_from_env: "DEPT_DATA_PLATFORM_API_KEYS"

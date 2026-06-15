@@ -199,6 +199,8 @@ Current baseline:
 
 - `server.max_request_body_bytes` limits JSON proxy request bodies before parsing
 - requests larger than the configured limit are rejected with `413`
+- departments may use inline `api_keys` for local development or `api_keys_from_env` for production secret handling
+- each department must declare exactly one of `api_keys` or `api_keys_from_env`
 
 Deferred:
 
@@ -390,18 +392,25 @@ security:
 
 departments:
   finance:
-    api_keys:
-      - finance-prod
+    api_keys_from_env: DEPT_FINANCE_API_KEYS
 
   hr:
-    api_keys:
-      - hr-app
+    api_keys_from_env: DEPT_HR_API_KEYS
 
   data_platform:
-    api_keys:
-      - dp-prod
-      - dp-batch
+    api_keys_from_env: DEPT_DATA_PLATFORM_API_KEYS
 ```
+
+Environment value format:
+
+- comma-separated string, for example `DEPT_FINANCE_API_KEYS=finance-prod,finance-batch`
+- or JSON array string, for example `DEPT_FINANCE_API_KEYS=["finance-prod","finance-batch"]`
+
+Operational rules:
+
+- production deployments should prefer `api_keys_from_env` over inline secrets
+- missing or empty env-backed secrets fail startup
+- secret values are not logged
 
 ## Deployment Notes
 

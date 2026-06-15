@@ -47,6 +47,19 @@ def test_app_config_precomputes_api_key_lookup(sample_config_dict) -> None:
     }
 
 
+def test_app_config_precomputes_api_key_lookup_from_env(monkeypatch, sample_config_dict) -> None:
+    sample_config_dict["departments"]["dept-a"] = {"api_keys_from_env": "DEPT_A_KEYS"}
+    monkeypatch.setenv("DEPT_A_KEYS", "key-dept-a,key-dept-a-2")
+
+    config = AppConfig.model_validate(sample_config_dict)
+
+    assert config.api_key_to_department == {
+        "key-dept-a": "dept-a",
+        "key-dept-a-2": "dept-a",
+        "key-dept-b": "dept-b",
+    }
+
+
 def test_resolve_department_for_api_key_returns_unknown_for_missing_key(sample_config_dict) -> None:
     config = AppConfig.model_validate(sample_config_dict)
 

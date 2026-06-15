@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -71,10 +73,60 @@ class UpstreamConfig(BaseModel):
 class DepartmentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    api_keys: list[str] = Field(min_length=1)
+    api_keys: list[str] | None = None
+    api_keys_from_env: str | None = None
+
+    @staticmethod
+    def _parse_api_keys_env_value(env_var_name: str) -> list[str]:
+        raw_value = os.environ.get(env_var_name)
+        if raw_value is None:
+            raise ValueError(f"department api_keys_from_env '{env_var_name}' is not set")
+
+        normalized_value = raw_value.strip()
+        if not normalized_value:
+            raise ValueError(f"department api_keys_from_env '{env_var_name}' is empty")
+
+        parsed_values: list[str]
+        if normalized_value.startswith("["):
+            try:
+                parsed_json = json.loads(normalized_value)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"department api_keys_from_env '{env_var_name}' must be a valid JSON array or comma-separated string"
+                ) from exc
+            if not isinstance(parsed_json, list) or not all(
+                isinstance(item, str) for item in parsed_json
+            ):
+                raise ValueError(
+                    f"department api_keys_from_env '{env_var_name}' must resolve to a list of strings"
+                )
+            parsed_values = parsed_json
+        else:
+            parsed_values = normalized_value.split(",")
+
+        normalized_api_keys = [api_key.strip() for api_key in parsed_values if api_key.strip()]
+        if not normalized_api_keys:
+            raise ValueError(
+                f"department api_keys_from_env '{env_var_name}' must contain at least one non-empty api key"
+            )
+
+        return normalized_api_keys
 
     @model_validator(mode="after")
     def validate_api_keys(self) -> "DepartmentConfig":
+        has_inline_api_keys = self.api_keys is not None
+        has_api_keys_from_env = self.api_keys_from_env is not None
+        if has_inline_api_keys == has_api_keys_from_env:
+            raise ValueError("department must declare exactly one of api_keys or api_keys_from_env")
+
+        if has_api_keys_from_env:
+            env_var_name = self.api_keys_from_env.strip() if self.api_keys_from_env is not None else ""
+            if not env_var_name:
+                raise ValueError("department api_keys_from_env must be non-empty")
+            self.api_keys_from_env = env_var_name
+            self.api_keys = self._parse_api_keys_env_value(env_var_name)
+
+        assert self.api_keys is not None
         normalized = [api_key.strip() for api_key in self.api_keys if api_key.strip()]
         if not normalized:
             raise ValueError("department must declare at least one non-empty api key")

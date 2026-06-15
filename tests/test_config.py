@@ -16,6 +16,34 @@ def test_load_config_returns_validated_app_config(sample_config_path) -> None:
     assert config.departments["dept-a"].api_keys == ["key-dept-a"]
 
 
+def test_load_config_resolves_department_api_keys_from_env(
+    monkeypatch,
+    sample_config_copy,
+    write_config,
+) -> None:
+    sample_config_copy["departments"]["dept-a"] = {"api_keys_from_env": "DEPT_A_KEYS"}
+    monkeypatch.setenv("DEPT_A_KEYS", "key-dept-a,key-dept-a-2")
+    config_path = write_config(sample_config_copy, filename="api-keys-from-env.yaml")
+
+    config = load_config(config_path)
+
+    assert config.departments["dept-a"].api_keys == ["key-dept-a", "key-dept-a-2"]
+
+
+def test_load_config_resolves_department_api_keys_from_json_array_env(
+    monkeypatch,
+    sample_config_copy,
+    write_config,
+) -> None:
+    sample_config_copy["departments"]["dept-a"] = {"api_keys_from_env": "DEPT_A_KEYS"}
+    monkeypatch.setenv("DEPT_A_KEYS", '["key-dept-a","key-dept-a-2"]')
+    config_path = write_config(sample_config_copy, filename="api-keys-from-json-env.yaml")
+
+    config = load_config(config_path)
+
+    assert config.departments["dept-a"].api_keys == ["key-dept-a", "key-dept-a-2"]
+
+
 def test_load_config_raises_for_missing_file(tmp_path) -> None:
     missing_path = tmp_path / "missing.yaml"
 
@@ -36,6 +64,41 @@ def test_load_config_rejects_duplicate_api_keys(sample_config_copy, write_config
     config_path = write_config(sample_config_copy, filename="duplicate-api-keys.yaml")
 
     with pytest.raises(ConfigError, match="assigned to more than one department"):
+        load_config(config_path)
+
+
+def test_load_config_rejects_department_with_both_inline_and_env_api_keys(
+    sample_config_copy,
+    write_config,
+) -> None:
+    sample_config_copy["departments"]["dept-a"]["api_keys_from_env"] = "DEPT_A_KEYS"
+    config_path = write_config(sample_config_copy, filename="both-api-key-sources.yaml")
+
+    with pytest.raises(ConfigError, match="exactly one of api_keys or api_keys_from_env"):
+        load_config(config_path)
+
+
+def test_load_config_rejects_missing_department_api_keys_env(
+    sample_config_copy,
+    write_config,
+) -> None:
+    sample_config_copy["departments"]["dept-a"] = {"api_keys_from_env": "DEPT_A_KEYS"}
+    config_path = write_config(sample_config_copy, filename="missing-api-keys-env.yaml")
+
+    with pytest.raises(ConfigError, match="api_keys_from_env 'DEPT_A_KEYS' is not set"):
+        load_config(config_path)
+
+
+def test_load_config_rejects_empty_department_api_keys_env(
+    monkeypatch,
+    sample_config_copy,
+    write_config,
+) -> None:
+    sample_config_copy["departments"]["dept-a"] = {"api_keys_from_env": "DEPT_A_KEYS"}
+    monkeypatch.setenv("DEPT_A_KEYS", "   ")
+    config_path = write_config(sample_config_copy, filename="empty-api-keys-env.yaml")
+
+    with pytest.raises(ConfigError, match="api_keys_from_env 'DEPT_A_KEYS' is empty"):
         load_config(config_path)
 
 
