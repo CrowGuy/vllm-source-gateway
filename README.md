@@ -81,6 +81,11 @@ Deferred:
 
 MVP should support `/v1/responses` so code agents and responses-based clients can use the gateway without requiring a separate compatibility path.
 
+Current scope:
+
+- the gateway guarantees `POST /v1/responses` proxy compatibility for stateless request forwarding
+- the gateway does not currently guarantee full stateful Responses API semantics such as stored-response retrieval, `previous_response_id`, or `GET /v1/responses/{id}`
+
 ### Streaming Behavior
 
 The gateway must support streaming pass-through for chat completions.
@@ -201,6 +206,7 @@ Current baseline:
 - requests larger than the configured limit are rejected with `413`
 - departments may use inline `api_keys` for local development or `api_keys_from_env` for production secret handling
 - each department must declare exactly one of `api_keys` or `api_keys_from_env`
+- configuration changes currently require a gateway restart to take effect; hot reload is not part of the current contract
 
 Deferred:
 

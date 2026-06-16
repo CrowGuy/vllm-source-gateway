@@ -251,7 +251,7 @@ Why defer:
 
 Action:
 
-- document restart requirement clearly
+- restart requirement is now documented; keep restart-based config changes unless hot reload becomes a deliberate feature
 
 ### `/v1/models` information exposure tuning
 
@@ -269,7 +269,7 @@ Why defer:
 
 Action:
 
-- document the current scope explicitly
+- current `POST /v1/responses` proxy-only scope is now documented; keep full stateful semantics out of the current MVP
 
 ## Suggested Next Order
 
