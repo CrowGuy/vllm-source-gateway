@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import httpx
-from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi import Depends, Header, Request
 
 from vllm_source_gateway.config import AppConfig
 from vllm_source_gateway.metrics import GatewayMetrics
@@ -97,19 +97,6 @@ def resolve_department_for_api_key(config: AppConfig, api_key: str | None) -> So
         api_key=api_key,
         resolution_source="unknown",
     )
-
-
-def require_api_key(
-    api_key: str | None = Header(default=None, alias="X-API-Key"),
-    authorization: str | None = Header(default=None),
-) -> str:
-    resolved = extract_api_key(authorization=authorization, x_api_key=api_key)
-    if resolved is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="missing api key",
-        )
-    return resolved
 
 
 def get_source_resolution_result(

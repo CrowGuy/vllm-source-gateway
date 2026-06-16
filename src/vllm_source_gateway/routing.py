@@ -20,8 +20,7 @@ class NoHealthyUpstreamError(RoutingError):
 
 
 class RoutingRegistry:
-    def __init__(self, upstreams: list[UpstreamTarget], strategy: str = "round_robin") -> None:
-        self.strategy = strategy
+    def __init__(self, upstreams: list[UpstreamTarget]) -> None:
         self._upstreams_by_name = {upstream.name: upstream for upstream in upstreams}
         self._model_to_upstreams: dict[str, tuple[UpstreamTarget, ...]] = self._build_model_index(upstreams)
         self._health_by_name = {upstream.name: True for upstream in upstreams}
@@ -38,7 +37,7 @@ class RoutingRegistry:
             )
             for upstream in config.upstreams
         ]
-        return cls(upstreams=upstreams, strategy=config.routing.strategy)
+        return cls(upstreams=upstreams)
 
     @staticmethod
     def _build_model_index(upstreams: list[UpstreamTarget]) -> dict[str, tuple[UpstreamTarget, ...]]:
@@ -95,9 +94,6 @@ class RoutingRegistry:
             upstreams = self._model_to_upstreams.get(model_name)
             if upstreams is None:
                 raise UnknownModelError(f"unknown model '{model_name}'")
-
-            if self.strategy != "round_robin":
-                raise RoutingError(f"unsupported routing strategy '{self.strategy}'")
 
             pool_size = len(upstreams)
             start_index = self._round_robin_index[model_name] % pool_size

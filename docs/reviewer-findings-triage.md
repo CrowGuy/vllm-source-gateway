@@ -228,6 +228,18 @@ Result:
 
 - production deployments no longer need to store real department API keys directly in repo-tracked YAML files
 
+### dead code and unreachable branches are cleaned up
+
+Current state:
+
+- obsolete `require_api_key` helper is removed
+- unreachable non-`round_robin` routing branch is removed
+- source-resolution and routing code now align more closely with the current product contract
+
+Result:
+
+- the codebase is less misleading and has fewer branches that imply unsupported behavior
+
 ## Defer
 
 ### config hot reload
@@ -258,19 +270,6 @@ Why defer:
 Action:
 
 - document the current scope explicitly
-
-### dead code and unreachable branch cleanup
-
-Examples:
-
-- `require_api_key`
-- repeated API key extraction patterns
-- unreachable non-round-robin strategy handling
-
-Why defer:
-
-- worth cleaning
-- not as urgent as health, client reuse, auth posture, or proxy correctness
 
 ## Suggested Next Order
 
