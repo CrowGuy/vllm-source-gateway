@@ -56,10 +56,24 @@ class SecurityConfig(BaseModel):
 
 class UpstreamConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    _authorization_token: str | None = PrivateAttr(default=None)
 
     name: str = Field(min_length=1)
     base_url: HttpUrl
     models: list[str] = Field(min_length=1)
+    authorization_from_env: str | None = None
+
+    @staticmethod
+    def _resolve_authorization_token(env_var_name: str) -> str:
+        raw_value = os.environ.get(env_var_name)
+        if raw_value is None:
+            raise ValueError(f"upstream authorization_from_env '{env_var_name}' is not set")
+
+        token = raw_value.strip()
+        if not token:
+            raise ValueError(f"upstream authorization_from_env '{env_var_name}' is empty")
+
+        return token
 
     @model_validator(mode="after")
     def validate_models(self) -> "UpstreamConfig":
@@ -67,7 +81,19 @@ class UpstreamConfig(BaseModel):
         if not normalized:
             raise ValueError("upstream must declare at least one non-empty model name")
         self.models = normalized
+
+        if self.authorization_from_env is not None:
+            env_var_name = self.authorization_from_env.strip()
+            if not env_var_name:
+                raise ValueError("upstream authorization_from_env must be non-empty")
+            self.authorization_from_env = env_var_name
+            self._authorization_token = self._resolve_authorization_token(env_var_name)
+
         return self
+
+    @property
+    def authorization_token(self) -> str | None:
+        return self._authorization_token
 
 
 class DepartmentConfig(BaseModel):

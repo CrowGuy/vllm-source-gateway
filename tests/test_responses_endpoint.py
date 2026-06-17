@@ -32,7 +32,10 @@ def test_responses_proxies_success_and_records_usage(
 
     response = app_client.post(
         "/v1/responses",
-        headers={"x-api-key": "key-dept-b"},
+        headers={
+            "x-api-key": "key-dept-b",
+            "authorization": "Bearer caller-token",
+        },
         json={
             "model": "model-b",
             "input": "hello",
@@ -43,6 +46,8 @@ def test_responses_proxies_success_and_records_usage(
     assert response.json()["id"] == "resp-123"
     assert recorder["url"] == "http://10.0.0.2:8000/v1/responses"
     assert recorder["json"]["model"] == "model-b"
+    assert recorder["headers"]["authorization"] == "Bearer upstream-token-b"
+    assert "x-api-key" not in recorder["headers"]
     assert response.headers["content-type"].startswith("application/json")
     assert "connection" not in response.headers
     assert "keep-alive" not in response.headers
@@ -130,7 +135,7 @@ def test_responses_streams_sse_and_tracks_missing_usage(
     app_client,
     install_fake_async_client,
 ) -> None:
-    install_fake_async_client(
+    recorder = install_fake_async_client(
         app_client=app_client,
         stream_response=FakeStreamingUpstreamResponse(
             chunks=[
@@ -156,6 +161,7 @@ def test_responses_streams_sse_and_tracks_missing_usage(
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     assert b'"text":"hel"' in body
+    assert recorder["headers"]["authorization"] == "Bearer upstream-token-b"
 
     metrics_text = app_client.get("/metrics").text
 

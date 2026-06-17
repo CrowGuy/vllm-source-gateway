@@ -1,0 +1,14 @@
+.git
+.gitignore
+.pytest_cache
+.ruff_cache
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.python-version
+docs
+tests
+e2e_validate_gemma4.sh
+config.e2e.gemma4.yaml

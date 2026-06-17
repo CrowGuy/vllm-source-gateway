@@ -1,0 +1,15 @@
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vllm-source-gateway:prod
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env.prod
+    environment:
+      VLLM_SOURCE_GATEWAY_CONFIG: /app/config.prod.yaml
+    volumes:
+      - ./config.prod.yaml:/app/config.prod.yaml:ro

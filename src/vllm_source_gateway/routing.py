@@ -34,6 +34,7 @@ class RoutingRegistry:
                 name=upstream.name,
                 base_url=str(upstream.base_url).rstrip("/"),
                 models=tuple(upstream.models),
+                authorization_token=upstream.authorization_token,
             )
             for upstream in config.upstreams
         ]

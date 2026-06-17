@@ -58,11 +58,13 @@ def sample_config_dict() -> dict[str, object]:
                 "name": "gpu-a",
                 "base_url": "http://10.0.0.1:8000",
                 "models": ["model-a", "shared-model"],
+                "authorization_from_env": "UPSTREAM_GPU_A_TOKEN",
             },
             {
                 "name": "gpu-b",
                 "base_url": "http://10.0.0.2:8000",
                 "models": ["model-b", "shared-model"],
+                "authorization_from_env": "UPSTREAM_GPU_B_TOKEN",
             },
         ],
         "departments": {
@@ -79,6 +81,12 @@ def sample_config_dict() -> dict[str, object]:
 @pytest.fixture
 def sample_config_copy(sample_config_dict: dict[str, object]) -> dict[str, object]:
     return copy.deepcopy(sample_config_dict)
+
+
+@pytest.fixture(autouse=True)
+def set_default_upstream_tokens(monkeypatch) -> None:
+    monkeypatch.setenv("UPSTREAM_GPU_A_TOKEN", "upstream-token-a")
+    monkeypatch.setenv("UPSTREAM_GPU_B_TOKEN", "upstream-token-b")
 
 
 @pytest.fixture

@@ -12,6 +12,7 @@ class UpstreamTarget:
     name: str
     base_url: str
     models: tuple[str, ...]
+    authorization_token: str | None = None
 
     def serves_model(self, model_name: str) -> bool:
         return model_name in self.models
@@ -40,4 +41,3 @@ class ModelAvailability:
 class UpstreamHealthSnapshot:
     upstream_name: str
     healthy: bool
-

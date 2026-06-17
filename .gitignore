@@ -136,6 +136,7 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
 .envrc
 .venv
 env/
@@ -210,3 +211,9 @@ __marimo__/
 AGENTS.md
 
 uv.lock
+
+.env
+.env.*
+!.env.prod.example
+
+*.tar

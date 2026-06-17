@@ -47,7 +47,7 @@ def test_chat_completions_proxies_success_and_records_usage(
     assert recorder["headers"]["x-trace-id"] == "trace-123"
     assert recorder["headers"]["x-request-id"] == "req-123"
     assert "x-api-key" not in recorder["headers"]
-    assert "authorization" not in recorder["headers"]
+    assert recorder["headers"]["authorization"] == "Bearer upstream-token-a"
     assert "cookie" not in recorder["headers"]
     assert "accept-encoding" not in recorder["headers"]
     assert "connection" not in recorder["headers"]
@@ -178,6 +178,7 @@ def test_chat_completions_streams_sse_and_records_usage(
     assert b'"prompt_tokens":7' in body
     assert recorder["send_stream"] is True
     assert recorder["url"] == "http://10.0.0.1:8000/v1/chat/completions"
+    assert recorder["headers"]["authorization"] == "Bearer upstream-token-a"
 
     metrics_text = app_client.get("/metrics").text
 

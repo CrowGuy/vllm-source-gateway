@@ -14,6 +14,8 @@ def test_routing_registry_builds_model_index(sample_config_dict) -> None:
     shared_model_upstreams = registry.get_model_upstreams("shared-model")
 
     assert [upstream.name for upstream in shared_model_upstreams] == ["gpu-a", "gpu-b"]
+    assert shared_model_upstreams[0].authorization_token == "upstream-token-a"
+    assert shared_model_upstreams[1].authorization_token == "upstream-token-b"
 
 
 def test_routing_registry_round_robins_across_same_model_upstreams(sample_config_dict) -> None:

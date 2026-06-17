@@ -73,12 +73,19 @@ def _should_forward_upstream_header(header_name: str) -> bool:
     return normalized.startswith(_ALLOWED_UPSTREAM_HEADER_PREFIXES)
 
 
-def _build_upstream_headers(request: Request) -> dict[str, str]:
-    return {
+def _build_upstream_headers(
+    request: Request,
+    *,
+    authorization_token: str | None = None,
+) -> dict[str, str]:
+    headers = {
         key: value
         for key, value in request.headers.items()
         if _should_forward_upstream_header(key)
     }
+    if authorization_token is not None:
+        headers["authorization"] = f"Bearer {authorization_token}"
+    return headers
 
 
 def _record_usage(
@@ -261,7 +268,7 @@ def _select_upstream(
     model_name: str,
     metrics: GatewayMetrics,
     endpoint_name: str,
-) -> str:
+) -> tuple[str, str | None]:
     try:
         selected = routing_registry.select_upstream(model_name)
     except UnknownModelError as exc:
@@ -279,7 +286,7 @@ def _select_upstream(
             detail=str(exc),
         ) from exc
 
-    return selected.upstream.base_url
+    return selected.upstream.base_url, selected.upstream.authorization_token
 
 
 def _consume_sse_events(
@@ -332,11 +339,15 @@ async def _proxy_streaming_response(
     department: str,
     endpoint_name: str,
     upstream_url: str,
+    upstream_authorization_token: str | None,
     payload: dict[str, Any],
     model_name: str,
     usage_extractor: UsageExtractor,
 ) -> Response:
-    request_headers = _build_upstream_headers(request)
+    request_headers = _build_upstream_headers(
+        request,
+        authorization_token=upstream_authorization_token,
+    )
 
     try:
         upstream_request = upstream_streaming_http_client.build_request(
@@ -496,7 +507,7 @@ async def proxy_json_endpoint(
         metrics=metrics,
         endpoint_name=endpoint_name,
     )
-    upstream_base_url = _select_upstream(
+    upstream_base_url, upstream_authorization_token = _select_upstream(
         routing_registry=routing_registry,
         model_name=model_name,
         metrics=metrics,
@@ -511,6 +522,7 @@ async def proxy_json_endpoint(
             department=department,
             endpoint_name=endpoint_name,
             upstream_url=f"{upstream_base_url}{upstream_path}",
+            upstream_authorization_token=upstream_authorization_token,
             payload=payload,
             model_name=model_name,
             usage_extractor=usage_extractor,
@@ -520,7 +532,10 @@ async def proxy_json_endpoint(
         upstream_response = await upstream_http_client.post(
             f"{upstream_base_url}{upstream_path}",
             json=payload,
-            headers=_build_upstream_headers(request),
+            headers=_build_upstream_headers(
+                request,
+                authorization_token=upstream_authorization_token,
+            ),
             timeout=_request_timeout(config),
         )
     except httpx.TimeoutException as exc:

@@ -14,6 +14,8 @@ def test_load_config_returns_validated_app_config(sample_config_path) -> None:
     assert config.routing.strategy == "round_robin"
     assert config.model_names == ["model-a", "model-b", "shared-model"]
     assert config.departments["dept-a"].api_keys == ["key-dept-a"]
+    assert config.upstreams[0].authorization_token == "upstream-token-a"
+    assert config.upstreams[1].authorization_token == "upstream-token-b"
 
 
 def test_load_config_resolves_department_api_keys_from_env(
@@ -42,6 +44,46 @@ def test_load_config_resolves_department_api_keys_from_json_array_env(
     config = load_config(config_path)
 
     assert config.departments["dept-a"].api_keys == ["key-dept-a", "key-dept-a-2"]
+
+
+def test_load_config_resolves_upstream_authorization_from_env(
+    monkeypatch,
+    sample_config_copy,
+    write_config,
+) -> None:
+    sample_config_copy["upstreams"][0]["authorization_from_env"] = "UPSTREAM_MODEL_A_TOKEN"
+    monkeypatch.setenv("UPSTREAM_MODEL_A_TOKEN", "prod-token-a")
+    config_path = write_config(sample_config_copy, filename="upstream-auth-from-env.yaml")
+
+    config = load_config(config_path)
+
+    assert config.upstreams[0].authorization_token == "prod-token-a"
+
+
+def test_load_config_rejects_missing_upstream_authorization_env(
+    monkeypatch,
+    sample_config_copy,
+    write_config,
+) -> None:
+    sample_config_copy["upstreams"][0]["authorization_from_env"] = "UPSTREAM_MODEL_A_TOKEN"
+    monkeypatch.delenv("UPSTREAM_MODEL_A_TOKEN", raising=False)
+    config_path = write_config(sample_config_copy, filename="missing-upstream-auth-env.yaml")
+
+    with pytest.raises(ConfigError, match="authorization_from_env 'UPSTREAM_MODEL_A_TOKEN' is not set"):
+        load_config(config_path)
+
+
+def test_load_config_rejects_empty_upstream_authorization_env(
+    monkeypatch,
+    sample_config_copy,
+    write_config,
+) -> None:
+    sample_config_copy["upstreams"][0]["authorization_from_env"] = "UPSTREAM_MODEL_A_TOKEN"
+    monkeypatch.setenv("UPSTREAM_MODEL_A_TOKEN", "   ")
+    config_path = write_config(sample_config_copy, filename="empty-upstream-auth-env.yaml")
+
+    with pytest.raises(ConfigError, match="authorization_from_env 'UPSTREAM_MODEL_A_TOKEN' is empty"):
+        load_config(config_path)
 
 
 def test_load_config_raises_for_missing_file(tmp_path) -> None:

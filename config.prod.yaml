@@ -21,23 +21,23 @@ security:
   reject_unknown_api_keys: false
 
 upstreams:
-  - name: "gpt-oss-120b-a"
-    base_url: "http://10.0.0.11:8000"
-    authorization_from_env: "UPSTREAM_GPT_OSS_120B_A_TOKEN"
+  - name: "gemma4-a"
+    base_url: "http://10.0.201.104:8000"
+    authorization_from_env: "UPSTREAM_GEMMA4_A_TOKEN"
     models:
-      - "gpt-oss-120b"
+      - "gemma-4-31b"
 
-  - name: "gpt-oss-120b-b"
-    base_url: "http://10.0.0.12:8000"
-    authorization_from_env: "UPSTREAM_GPT_OSS_120B_B_TOKEN"
-    models:
-      - "gpt-oss-120b"
+  #- name: "gemma4-b"
+  #  base_url: "http://10.0.201.105:8000"
+  #  authorization_from_env: "UPSTREAM_GEMMA4_B_TOKEN"
+  #  models:
+  #    - "gemma-4-31b"
 
-  - name: "qwen3-32b-a"
-    base_url: "http://10.0.0.21:8000"
-    authorization_from_env: "UPSTREAM_QWEN3_32B_A_TOKEN"
-    models:
-      - "qwen3-32b"
+  #- name: "qwen3-32b-a"
+  #  base_url: "http://10.0.201.106:8000"
+  #  authorization_from_env: "UPSTREAM_QWEN3_32B_A_TOKEN"
+  #  models:
+  #    - "qwen3-32b"
 
 departments:
   finance:

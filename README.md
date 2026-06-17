@@ -183,6 +183,7 @@ For the current gateway:
 
 - request forwarding keeps a bounded allowlist of useful client headers
 - `authorization`, `x-api-key`, `cookie`, `accept-encoding`, and hop-by-hop headers are not forwarded upstream
+- when an upstream declares `authorization_from_env`, the gateway injects its own `Authorization: Bearer <token>` header for upstream traffic and health probes
 - downstream hop-by-hop headers are stripped before returning the response
 - `content-encoding` is also stripped from downstream proxy responses to avoid mismatches after client-side decoding
 
@@ -206,6 +207,8 @@ Current baseline:
 - requests larger than the configured limit are rejected with `413`
 - departments may use inline `api_keys` for local development or `api_keys_from_env` for production secret handling
 - each department must declare exactly one of `api_keys` or `api_keys_from_env`
+- upstreams may declare `authorization_from_env` for per-upstream bearer auth injection
+- env-backed upstream auth values must be raw token strings without the `Bearer ` prefix
 - configuration changes currently require a gateway restart to take effect; hot reload is not part of the current contract
 
 Deferred:
@@ -257,6 +260,155 @@ Start the gateway:
 python -m uvicorn vllm_source_gateway.main:app --host 0.0.0.0 --port 8080
 ```
 
+### Container Build
+
+Build the image:
+
+```bash
+docker build -t vllm-source-gateway:local .
+```
+
+Run the container with a mounted config file and env-backed secrets:
+
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  -v "$(pwd)/config.yaml:/app/config.yaml:ro" \
+  -e VLLM_SOURCE_GATEWAY_CONFIG=/app/config.yaml \
+  -e DEPT_FINANCE_API_KEYS=finance-prod \
+  -e UPSTREAM_GPT_OSS_120B_A_TOKEN=replace-me \
+  vllm-source-gateway:local
+```
+
+Container notes:
+
+- the image expects configuration to be provided at runtime rather than baked into the image
+- configuration changes still require a container restart to take effect
+- production secrets should be injected through environment variables referenced by `api_keys_from_env`
+- upstream bearer tokens should also be injected through environment variables referenced by `authorization_from_env`
+
+## Production With Docker Compose
+
+The current production recommendation is:
+
+- use `config.prod.yaml` for the deployed routing and secret-name contract
+- use `docker-compose.prod.yml` to run the container
+- use a single `.env.prod` file to hold real department API keys and upstream bearer tokens
+- treat the Docker image as an environment-agnostic artifact
+- keep environment-specific values in `config.prod.yaml` and `.env.prod`, not in the image
+
+Tracked sample files:
+
+- `config.prod.yaml`
+- `docker-compose.prod.yml`
+- `.env.prod.example`
+
+Runtime secret rules:
+
+- `config.prod.yaml` stores env var names only
+- `.env.prod` stores the real values
+- `.env.prod` must not be committed
+- `.env.prod` should be maintained by the deployment owner on the target host
+- changing `config.prod.yaml` or `.env.prod` still requires a container restart
+
+### Production Setup
+
+Create the runtime env file from the tracked example:
+
+```bash
+cp .env.prod.example .env.prod
+```
+
+Edit `.env.prod` with real values. Department keys and upstream tokens can live in the same file:
+
+```env
+DEPT_FINANCE_API_KEYS=finance-key-1,finance-key-2
+DEPT_HR_API_KEYS=hr-key-1
+DEPT_DATA_PLATFORM_API_KEYS=data-platform-key-1
+
+UPSTREAM_GEMMA4_A_TOKEN=replace-me
+UPSTREAM_GEMMA4_B_TOKEN=replace-me
+UPSTREAM_QWEN3_32B_A_TOKEN=replace-me
+```
+
+Bring the gateway up with Docker Compose:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Stop it:
+
+```bash
+docker compose -f docker-compose.prod.yml down
+```
+
+### Offline Image Transport
+
+When the target environment cannot build or pull images directly, move a tested image into the
+offline environment instead of rebuilding there.
+
+Build and tag the image on a connected machine:
+
+```bash
+docker compose -f docker-compose.prod.yml build
+docker tag vllm-source-gateway:prod vllm-source-gateway:prod-offline
+```
+
+Export the image:
+
+```bash
+docker save -o vllm-source-gateway-prod-offline.tar vllm-source-gateway:prod-offline
+```
+
+On the offline host, load the image and start the service:
+
+```bash
+docker load -i vllm-source-gateway-prod-offline.tar
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Recommended deployment bundle for an offline host:
+
+- `docker-compose.prod.yml`
+- `config.prod.yaml`
+- `.env.prod`
+- `vllm-source-gateway-prod-offline.tar`
+
+### Naming Convention
+
+Recommended env var naming:
+
+- department API keys: `DEPT_<DEPARTMENT_NAME>_API_KEYS`
+- upstream bearer tokens: `UPSTREAM_<MODEL_OR_SERVICE>_<INSTANCE>_TOKEN`
+
+Examples:
+
+- `DEPT_FINANCE_API_KEYS`
+- `DEPT_DATA_PLATFORM_API_KEYS`
+- `UPSTREAM_GEMMA4_A_TOKEN`
+- `UPSTREAM_QWEN3_32B_A_TOKEN`
+
+Operational guidance:
+
+- upstream tokens are managed per upstream service instance
+- upstream token values must contain the token body only, without the `Bearer ` prefix
+- if an env-backed department key or upstream token is missing, gateway startup fails fast
+
+### Production Host Baseline
+
+This gateway has been validated successfully on a newer production host and has previously failed on
+an older host with container `exit=139` segmentation faults.
+
+Operational recommendation:
+
+- use a modern Linux host with a current Docker Engine / Compose runtime
+- do not treat very old Docker Compose or host OS versions as a supported baseline
+- if possible, validate the exact image tag on the target host before declaring it production-ready
+
+If the deployment environment is constrained, prefer moving a tested image to a newer host over
+rebuilding the gateway inside an older runtime stack.
+
 ### Basic Smoke Checks
 
 Liveness:
@@ -276,6 +428,104 @@ Metrics:
 ```bash
 curl http://127.0.0.1:8080/metrics
 ```
+
+Smoke validation after a Compose deploy:
+
+```bash
+curl http://127.0.0.1:8080/livez
+curl http://127.0.0.1:8080/readyz
+curl http://127.0.0.1:8080/v1/models
+```
+
+### Post-Deploy Validation Checklist
+
+After `docker compose up -d`, validate in this order:
+
+1. container status
+
+```bash
+docker compose -f docker-compose.prod.yml ps
+```
+
+2. recent gateway logs
+
+```bash
+docker compose -f docker-compose.prod.yml logs gateway --tail=200
+```
+
+3. liveness and readiness
+
+```bash
+curl http://127.0.0.1:8080/livez
+curl http://127.0.0.1:8080/readyz
+```
+
+4. model discovery
+
+```bash
+curl -sS http://127.0.0.1:8080/v1/models
+```
+
+5. non-streaming request path
+
+```bash
+curl -sS \
+  -H "content-type: application/json" \
+  -H "x-api-key: ${API_KEY}" \
+  -X POST "http://127.0.0.1:8080/v1/chat/completions" \
+  --data '{
+    "model": "gemma-4-31b",
+    "messages": [{"role": "user", "content": "Reply with exactly: hello from gateway"}]
+  }'
+```
+
+6. streaming request path
+
+```bash
+curl -sS -N \
+  -H "content-type: application/json" \
+  -H "x-api-key: ${API_KEY}" \
+  -X POST "http://127.0.0.1:8080/v1/chat/completions" \
+  --data '{
+    "model": "gemma-4-31b",
+    "messages": [{"role": "user", "content": "Count to 3 in one short line"}],
+    "stream": true
+  }'
+```
+
+7. metrics contract visibility
+
+```bash
+curl -sS http://127.0.0.1:8080/metrics | grep gateway_http_requests_total
+curl -sS http://127.0.0.1:8080/metrics | grep gateway_source_resolution_total
+curl -sS http://127.0.0.1:8080/metrics | grep gateway_token_accounting_total
+```
+
+If the upstream returns reliable usage, also check:
+
+```bash
+curl -sS http://127.0.0.1:8080/metrics | grep gateway_prompt_tokens_total
+curl -sS http://127.0.0.1:8080/metrics | grep gateway_generation_tokens_total
+```
+
+### Troubleshooting
+
+Common deployment failures and first checks:
+
+- container exits immediately with missing env errors
+  - verify `.env.prod` contains every `DEPT_*_API_KEYS` and `UPSTREAM_*_TOKEN` referenced by `config.prod.yaml`
+- `/readyz` fails while `/livez` succeeds
+  - verify upstream `base_url` reachability and upstream bearer token correctness
+- `/v1/models` is empty or models are `unavailable`
+  - verify upstream health probe path and upstream authentication
+- requests return `401`
+  - verify the caller is using a mapped API key or check whether `security.reject_unknown_api_keys=true`
+- container restarts repeatedly
+  - inspect `docker compose logs gateway`
+  - inspect `docker ps -a` and `docker inspect <container_id>`
+- older hosts show container `exit=139`
+  - treat this as a runtime compatibility issue first
+  - move the tested image to a newer host rather than debugging application logic first
 
 For one real-upstream validation flow using `gemma-4-31b`, see
 [docs/e2e-validation-gemma4.md](/home/randy/Documents/crow/vllm-source-gateway/docs/e2e-validation-gemma4.md).
@@ -412,9 +662,16 @@ Environment value format:
 - comma-separated string, for example `DEPT_FINANCE_API_KEYS=finance-prod,finance-batch`
 - or JSON array string, for example `DEPT_FINANCE_API_KEYS=["finance-prod","finance-batch"]`
 
+Upstream auth format:
+
+- `authorization_from_env` points to an env var whose value is the token body only
+- do not include the `Bearer ` prefix in the env var value
+- missing or empty upstream auth env values fail startup
+
 Operational rules:
 
 - production deployments should prefer `api_keys_from_env` over inline secrets
+- production deployments should also prefer `authorization_from_env` over inline upstream credentials
 - missing or empty env-backed secrets fail startup
 - secret values are not logged
 

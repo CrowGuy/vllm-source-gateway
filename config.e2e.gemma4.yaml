@@ -19,6 +19,7 @@ routing:
 upstreams:
   - name: "gemma4-a"
     base_url: "http://10.0.201.104:8000"
+    authorization_from_env: "UPSTREAM_GEMMA4_A_TOKEN"
     models:
       - "gemma-4-31b"
 
