@@ -15,6 +15,24 @@ This triage is based on:
 - the current repository state
 - existing tests
 - one completed real-upstream E2E validation run
+- the current deployment baseline being single process / single worker
+
+## Current Contract
+
+The current gateway contract is intentionally locked to a **single-process deployment baseline**.
+
+Current baseline:
+
+- one uvicorn worker per container
+- in-memory routing state is process-local and accepted under that baseline
+- in-memory upstream health state is process-local and accepted under that baseline
+- in-memory Prometheus registry state is process-local and accepted under that baseline
+
+Not part of the current contract:
+
+- multi-worker safety
+- shared-state coordination across workers
+- horizontally scaled request distribution with consistent per-process metrics semantics
 
 ## Outdated
 
@@ -201,7 +219,77 @@ Result:
 
 - request-level operational debugging is much more practical without introducing a separate logging stack
 
+### single-process contract vs stateless wording is now clarified
+
+Current state:
+
+- the deployment baseline is now explicitly documented as single process / single worker per container
+- README no longer implies that the current implementation already supports stateless horizontal scaling
+- current in-memory routing, health, and metrics state are described as accepted constraints under that baseline
+
+Result:
+
+- the documented deployment contract is now aligned with the current implementation
+- multi-worker or shared-state scaling is no longer implied as a present capability
+
+### `/metrics` access boundary is now clarified
+
+Current state:
+
+- README now treats `/metrics` as an internal observability surface
+- the deployment posture is explicitly internal Prometheus scrape or trusted internal network access
+- stronger protection, if needed, is currently expected to be enforced at the deployment or network boundary
+
+Result:
+
+- the project no longer implies that unauthenticated public exposure of `/metrics` is an accepted production posture
+
+### non-proxy route observability scope is now clarified
+
+Current state:
+
+- README now states that the bounded metrics contract is optimized for source-attributed proxy traffic
+- `/v1/chat/completions` and `/v1/responses` are documented as the primary inputs for department-level request, token, and failure views
+- `/v1/models`, `/livez`, `/readyz`, `/healthz`, `/metrics`, generic `404` responses, and some pre-proxy failures are explicitly documented as outside the current first-class source-attributed metrics contract
+
+Result:
+
+- the current observability contract is now explicit instead of implying full route-level coverage for every gateway endpoint
+
+## Should Clarify Now
+
 ## Next Hardening Batch
+
+### health probing is still serial
+
+Reviewer observation:
+
+- valid
+
+Current state:
+
+- upstream probes are awaited sequentially during one refresh cycle
+- refresh latency scales linearly with upstream count and timeout duration
+
+Recommended next action:
+
+- switch one refresh cycle to concurrent probing with `asyncio.gather`
+
+### same-model failover is still absent for connect-stage upstream failures
+
+Reviewer observation:
+
+- valid
+
+Current state:
+
+- a single connect or timeout failure still returns `502` or `504`
+- the current proxy path does not attempt a same-model fallback to another healthy replica
+
+Recommended next action:
+
+- consider a narrowly scoped failover only for connect-stage or pre-response failures that are safe to retry
+- keep this explicitly narrower than a general retry layer
 
 ### gateway-origin and upstream-origin failures are distinguished
 
@@ -228,6 +316,49 @@ Result:
 
 - production deployments no longer need to store real department API keys directly in repo-tracked YAML files
 
+### container runtime still runs as root
+
+Reviewer observation:
+
+- valid
+
+Current state:
+
+- the runtime container still executes as root
+
+Recommended next action:
+
+- add a non-root runtime user in the production container image
+
+### container healthcheck is still missing
+
+Reviewer observation:
+
+- valid
+
+Current state:
+
+- Docker and Compose definitions do not yet declare a container-level healthcheck
+- `/livez` and `/readyz` already exist and can back that check
+
+Recommended next action:
+
+- add a container healthcheck using `/livez` or `/readyz`
+
+### SSE decode buffer still has no explicit upper bound
+
+Reviewer observation:
+
+- valid
+
+Current state:
+
+- streaming SSE parsing still allows unbounded decode-buffer growth if an upstream never terminates events correctly
+
+Recommended next action:
+
+- add a reasonable guardrail for decode-buffer growth as a targeted hardening step
+
 ### dead code and unreachable branches are cleaned up
 
 Current state:
@@ -239,6 +370,44 @@ Current state:
 Result:
 
 - the codebase is less misleading and has fewer branches that imply unsupported behavior
+
+## Valid but Defer
+
+### env resolution inside Pydantic validation
+
+Reviewer observation:
+
+- valid as a design tradeoff
+
+Why defer:
+
+- current startup fail-fast behavior is intentional
+- the current delivery path values runtime secret resolution simplicity over separating config lint from secret resolution
+- config lint or dry-run without secrets is not yet a current requirement
+
+Action:
+
+- keep the current env-backed validation behavior unless standalone config validation becomes a concrete need
+
+## Already Handled or Narrowed
+
+### per-process routing, health, and metrics state
+
+Reviewer observation:
+
+- valid only as a blocker for multi-worker or multi-process deployment
+
+Current state:
+
+- routing round-robin state is process-local
+- upstream health state is process-local
+- metrics registry state is process-local
+
+Result:
+
+- under the current single-process baseline, these are known and accepted constraints
+- they should not be treated as already solved for multi-worker deployment
+- they become blocking only if the project adopts multi-worker or horizontally scaled shared-state operation
 
 ## Defer
 
@@ -275,14 +444,20 @@ Action:
 
 Recommended next implementation order:
 
-1. upstream health policy
-2. shared `AsyncClient`
-3. 2xx-only token accounting
-4. header forwarding hardening
-5. metrics middleware, readiness, and histogram improvements
+1. clarify single-process contract in docs
+2. concurrent upstream health probing
+3. connect-stage same-model failover
+4. non-root container runtime
+5. Docker or Compose healthcheck
+6. observability scope clarification for non-proxy routes
+7. optional SSE buffer bound hardening
 
 ## Assumptions
 
 - This triage assumes the current repo state is the source of truth.
 - This triage assumes one successful real-upstream E2E run is part of the current baseline.
 - `reject_unknown_keys` should remain a decision point until the gateway's security boundary is explicitly defined.
+- the gateway is intentionally locked to a single-process / single-worker deployment baseline for now
+- `/metrics` is expected to be exposed only to internal Prometheus or trusted internal network paths
+- multi-worker support is not part of the current contract
+- horizontal scaling remains a future architecture topic, not a present guarantee

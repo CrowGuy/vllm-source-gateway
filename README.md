@@ -310,6 +310,7 @@ Runtime secret rules:
 - `.env.prod` must not be committed
 - `.env.prod` should be maintained by the deployment owner on the target host
 - changing `config.prod.yaml` or `.env.prod` still requires a container restart
+- `/metrics` should be treated as an internal observability surface, not a public endpoint
 
 ### Production Setup
 
@@ -405,6 +406,7 @@ Operational recommendation:
 - use a modern Linux host with a current Docker Engine / Compose runtime
 - do not treat very old Docker Compose or host OS versions as a supported baseline
 - if possible, validate the exact image tag on the target host before declaring it production-ready
+- expose `/metrics` only to internal Prometheus or trusted internal network paths
 
 If the deployment environment is constrained, prefer moving a tested image to a newer host over
 rebuilding the gateway inside an older runtime stack.
@@ -535,6 +537,19 @@ For one real-upstream validation flow using `gemma-4-31b`, see
 ## Interop Contract with `vllm-usage-observability`
 
 This repo must expose raw metrics that the observability repo can consume as stable inputs.
+
+Security posture for `/metrics`:
+
+- `/metrics` is intended for internal Prometheus scrape traffic
+- do not treat unauthenticated public exposure of `/metrics` as an accepted production posture
+- if stronger protection is needed, enforce it at the deployment or network boundary
+
+Observability scope:
+
+- the current bounded metrics contract is optimized for source-attributed proxy traffic
+- `/v1/chat/completions` and `/v1/responses` are the primary routes expected to feed department-level request, token, and failure views
+- `/v1/models`, `/livez`, `/readyz`, `/healthz`, `/metrics`, generic `404` responses, and some pre-proxy failures are not currently first-class parts of the source-attributed metrics contract
+- access logging follows the same bias toward operationally relevant proxy traffic
 
 ### Required Metrics
 
@@ -699,7 +714,9 @@ For MVP planning:
 
 - GPU is not required
 - prioritize stable networking, moderate CPU, and enough memory for concurrent connections
-- design the service to remain stateless so it can scale horizontally later
+- current deployment baseline is single process / single worker per container
+- current in-memory routing, health, and metrics state are intentionally accepted under that baseline
+- treat multi-worker or horizontally scaled shared-state support as future architecture work, not a current guarantee
 
 Representative starting point:
 
