@@ -37,6 +37,18 @@ def test_routing_registry_skips_unhealthy_upstreams(sample_config_dict) -> None:
     assert selection.upstream.name == "gpu-b"
 
 
+def test_routing_registry_skips_excluded_upstreams(sample_config_dict) -> None:
+    config = AppConfig.model_validate(sample_config_dict)
+    registry = RoutingRegistry.from_config(config)
+
+    selection = registry.select_upstream(
+        "shared-model",
+        excluded_upstream_names={"gpu-a"},
+    )
+
+    assert selection.upstream.name == "gpu-b"
+
+
 def test_routing_registry_raises_when_model_has_no_healthy_upstream(sample_config_dict) -> None:
     config = AppConfig.model_validate(sample_config_dict)
     registry = RoutingRegistry.from_config(config)

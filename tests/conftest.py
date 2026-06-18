@@ -189,15 +189,20 @@ class FakeAsyncClient:
         response: FakeUpstreamResponse | None = None,
         stream_response: FakeUpstreamResponse | None = None,
         exception: Exception | None = None,
+        post_side_effects: list[FakeUpstreamResponse | Exception] | None = None,
+        send_side_effects: list[FakeUpstreamResponse | Exception] | None = None,
         recorder: dict[str, Any] | None = None,
         timeout: Any = None,
     ) -> None:
         self._response = response or FakeUpstreamResponse(payload={})
         self._stream_response = stream_response or self._response
         self._exception = exception
+        self._post_side_effects = list(post_side_effects or [])
+        self._send_side_effects = list(send_side_effects or [])
         self._recorder = recorder if recorder is not None else {}
         self._recorder["timeout"] = timeout
         self._recorder["client_closed"] = False
+        self._recorder["requests"] = []
 
     async def __aenter__(self) -> "FakeAsyncClient":
         return self
@@ -231,20 +236,48 @@ class FakeAsyncClient:
         headers: dict[str, str],
         timeout: Any = None,
     ) -> FakeUpstreamResponse:
+        self._recorder["requests"].append(
+            {
+                "kind": "post",
+                "url": url,
+                "json": json,
+                "headers": headers,
+                "timeout": timeout,
+            }
+        )
         self._recorder["url"] = url
         self._recorder["json"] = json
         self._recorder["headers"] = headers
         self._recorder["request_timeout"] = timeout
+        if self._post_side_effects:
+            result = self._post_side_effects.pop(0)
+            if isinstance(result, Exception):
+                raise result
+            return result
         if self._exception is not None:
             raise self._exception
         return self._response
 
     async def send(self, request: FakeBuiltRequest, *, stream: bool) -> FakeUpstreamResponse:
+        self._recorder["requests"].append(
+            {
+                "kind": "send",
+                "url": request.url,
+                "json": request.json_body,
+                "headers": request.headers,
+                "stream": stream,
+            }
+        )
         self._recorder["send_stream"] = stream
         self._recorder["method"] = request.method
         self._recorder["url"] = request.url
         self._recorder["json"] = request.json_body
         self._recorder["headers"] = request.headers
+        if self._send_side_effects:
+            result = self._send_side_effects.pop(0)
+            if isinstance(result, Exception):
+                raise result
+            return result
         if self._exception is not None:
             raise self._exception
         return self._stream_response
@@ -258,12 +291,16 @@ def install_fake_async_client():
         response: FakeUpstreamResponse | None = None,
         stream_response: FakeUpstreamResponse | None = None,
         exception: Exception | None = None,
+        post_side_effects: list[FakeUpstreamResponse | Exception] | None = None,
+        send_side_effects: list[FakeUpstreamResponse | Exception] | None = None,
     ) -> dict[str, Any]:
         recorder: dict[str, Any] = {}
         fake_client = FakeAsyncClient(
             response=response,
             stream_response=stream_response,
             exception=exception,
+            post_side_effects=post_side_effects,
+            send_side_effects=send_side_effects,
             recorder=recorder,
         )
         app_client.app.state.upstream_http_client = fake_client

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 
 from vllm_source_gateway.config import AppConfig
@@ -145,3 +147,43 @@ async def test_upstream_health_monitor_marks_403_as_unhealthy(
 
     snapshots = {snapshot.upstream_name: snapshot.healthy for snapshot in registry.health_snapshots()}
     assert snapshots["gpu-a"] is False
+
+
+async def test_upstream_health_monitor_probes_upstreams_concurrently(
+    monkeypatch,
+    sample_config_copy,
+) -> None:
+    sample_config_copy["health"]["enabled"] = True
+    config = AppConfig.model_validate(sample_config_copy)
+    registry = RoutingRegistry.from_config(config)
+
+    first_url = "http://10.0.0.1:8000/v1/models"
+    second_url = "http://10.0.0.2:8000/v1/models"
+    first_started = asyncio.Event()
+    second_started = asyncio.Event()
+
+    class ConcurrentFakeHealthAsyncClient:
+        async def get(self, url: str, *, headers: dict[str, str], follow_redirects: bool) -> FakeHealthResponse:
+            assert follow_redirects is True
+            if url == first_url:
+                first_started.set()
+                await asyncio.wait_for(second_started.wait(), timeout=0.2)
+                return FakeHealthResponse(200)
+            if url == second_url:
+                second_started.set()
+                return FakeHealthResponse(200)
+            raise AssertionError(f"unexpected url: {url}")
+
+        async def aclose(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "vllm_source_gateway.services.upstream_health.httpx.AsyncClient",
+        lambda **_kwargs: ConcurrentFakeHealthAsyncClient(),
+    )
+
+    monitor = UpstreamHealthMonitor(config=config, routing_registry=registry)
+    await asyncio.wait_for(monitor.refresh_all(), timeout=0.5)
+
+    assert first_started.is_set() is True
+    assert second_started.is_set() is True

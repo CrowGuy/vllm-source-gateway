@@ -232,6 +232,19 @@ Result:
 - the documented deployment contract is now aligned with the current implementation
 - multi-worker or shared-state scaling is no longer implied as a present capability
 
+### health probing is no longer serial
+
+Current state:
+
+- one refresh cycle now probes configured upstreams concurrently
+- refresh latency is no longer forced to scale linearly with upstream count under one health interval
+- routing health state is updated from the concurrent probe results of that refresh cycle
+
+Result:
+
+- health state can converge faster as upstream count grows
+- the current single-process baseline no longer serializes one full probe round across all upstreams
+
 ### `/metrics` access boundary is now clarified
 
 Current state:
@@ -256,40 +269,22 @@ Result:
 
 - the current observability contract is now explicit instead of implying full route-level coverage for every gateway endpoint
 
+### same-model connect-stage failover is now present
+
+Current state:
+
+- when a selected upstream fails with a connect-stage transport error before any upstream response is received, the gateway can retry another healthy upstream for the same model
+- the failover scope is intentionally narrow and does not act as a general retry layer
+- upstream non-2xx responses and already-started response paths are still not retried through this mechanism
+
+Result:
+
+- multi-replica model pools can tolerate one connect-stage upstream failure without immediately returning `502` or `504`
+- the current behavior is narrower and safer than a full retry system while still improving availability
+
 ## Should Clarify Now
 
 ## Next Hardening Batch
-
-### health probing is still serial
-
-Reviewer observation:
-
-- valid
-
-Current state:
-
-- upstream probes are awaited sequentially during one refresh cycle
-- refresh latency scales linearly with upstream count and timeout duration
-
-Recommended next action:
-
-- switch one refresh cycle to concurrent probing with `asyncio.gather`
-
-### same-model failover is still absent for connect-stage upstream failures
-
-Reviewer observation:
-
-- valid
-
-Current state:
-
-- a single connect or timeout failure still returns `502` or `504`
-- the current proxy path does not attempt a same-model fallback to another healthy replica
-
-Recommended next action:
-
-- consider a narrowly scoped failover only for connect-stage or pre-response failures that are safe to retry
-- keep this explicitly narrower than a general retry layer
 
 ### gateway-origin and upstream-origin failures are distinguished
 

@@ -57,9 +57,15 @@ class UpstreamHealthMonitor:
                 timeout=httpx.Timeout(self._config.health.request_timeout_seconds),
             )
 
-        for upstream in self._routing_registry.health_snapshots():
-            upstream_target = self._routing_registry.get_upstream(upstream.upstream_name)
-            healthy = await self._probe_upstream(upstream_target)
+        upstream_targets = [
+            self._routing_registry.get_upstream(upstream.upstream_name)
+            for upstream in self._routing_registry.health_snapshots()
+        ]
+        probe_results = await asyncio.gather(
+            *(self._probe_upstream(upstream_target) for upstream_target in upstream_targets)
+        )
+
+        for upstream_target, healthy in zip(upstream_targets, probe_results, strict=True):
             self._routing_registry.set_upstream_health(upstream_target.name, healthy=healthy)
 
     async def _run(self) -> None:

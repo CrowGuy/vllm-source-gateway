@@ -107,6 +107,7 @@ For MVP:
 1. resolve the requested `model_name`
 2. select the upstream pool serving that model
 3. use round-robin across healthy upstreams in that pool
+4. if a selected upstream fails during a connect-stage request attempt, retry another healthy upstream for the same model before failing the request
 
 The same routing registry is also the source of truth for `GET /v1/models`.
 

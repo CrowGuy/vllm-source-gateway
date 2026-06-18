@@ -116,6 +116,43 @@ def test_chat_completions_returns_504_on_upstream_timeout(
     )
 
 
+def test_chat_completions_failsover_to_second_upstream_on_connect_error(
+    app_client,
+    install_fake_async_client,
+) -> None:
+    recorder = install_fake_async_client(
+        app_client=app_client,
+        post_side_effects=[
+            httpx.ConnectError("connection failed"),
+            FakeUpstreamResponse(
+                payload={
+                    "id": "chatcmpl-failover",
+                    "object": "chat.completion",
+                    "choices": [{"index": 0, "message": {"role": "assistant", "content": "hello"}}],
+                    "usage": {"prompt_tokens": 4, "completion_tokens": 6},
+                }
+            ),
+        ],
+    )
+
+    response = app_client.post(
+        "/v1/chat/completions",
+        headers={"x-api-key": "key-dept-a"},
+        json={
+            "model": "shared-model",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "chatcmpl-failover"
+    assert [request["url"] for request in recorder["requests"]] == [
+        "http://10.0.0.1:8000/v1/chat/completions",
+        "http://10.0.0.2:8000/v1/chat/completions",
+    ]
+    assert recorder["headers"]["authorization"] == "Bearer upstream-token-b"
+
+
 def test_chat_completions_tracks_upstream_origin_failures(
     app_client,
     install_fake_async_client,
@@ -188,6 +225,44 @@ def test_chat_completions_streams_sse_and_records_usage(
         'gateway_token_accounting_total{accounting_status="recorded",endpoint="chat_completions"} 1.0'
         in metrics_text
     )
+
+
+def test_chat_completions_streaming_failsover_to_second_upstream_on_connect_error(
+    app_client,
+    install_fake_async_client,
+) -> None:
+    recorder = install_fake_async_client(
+        app_client=app_client,
+        send_side_effects=[
+            httpx.ConnectError("connection failed"),
+            FakeStreamingUpstreamResponse(
+                chunks=[
+                    b'data: {"id":"chunk-1","choices":[{"delta":{"content":"ok"}}]}\n\n',
+                    b"data: [DONE]\n\n",
+                ]
+            ),
+        ],
+    )
+
+    with app_client.stream(
+        "POST",
+        "/v1/chat/completions",
+        headers={"x-api-key": "key-dept-a"},
+        json={
+            "model": "shared-model",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    ) as response:
+        body = b"".join(response.iter_bytes())
+
+    assert response.status_code == 200
+    assert b'"content":"ok"' in body
+    assert [request["url"] for request in recorder["requests"]] == [
+        "http://10.0.0.1:8000/v1/chat/completions",
+        "http://10.0.0.2:8000/v1/chat/completions",
+    ]
+    assert recorder["headers"]["authorization"] == "Bearer upstream-token-b"
 
 
 def test_chat_completions_unexpected_500_is_recorded_by_metrics_middleware(

@@ -268,9 +268,13 @@ def _select_upstream(
     model_name: str,
     metrics: GatewayMetrics,
     endpoint_name: str,
-) -> tuple[str, str | None]:
+    excluded_upstream_names: set[str] | None = None,
+) -> tuple[str, str | None, str]:
     try:
-        selected = routing_registry.select_upstream(model_name)
+        selected = routing_registry.select_upstream(
+            model_name,
+            excluded_upstream_names=excluded_upstream_names,
+        )
     except UnknownModelError as exc:
         raise _raise_http_error(
             metrics=metrics,
@@ -286,7 +290,35 @@ def _select_upstream(
             detail=str(exc),
         ) from exc
 
-    return selected.upstream.base_url, selected.upstream.authorization_token
+    return selected.upstream.base_url, selected.upstream.authorization_token, selected.upstream.name
+
+
+def _is_connect_stage_retryable_error(exc: Exception) -> bool:
+    return isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout))
+
+
+def _raise_upstream_transport_error(
+    *,
+    metrics: GatewayMetrics,
+    endpoint_name: str,
+    exc: Exception,
+) -> HTTPException:
+    if isinstance(exc, httpx.TimeoutException):
+        raise _raise_http_error(
+            metrics=metrics,
+            endpoint=endpoint_name,
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="upstream request timed out",
+            accounting_status="missing_usage",
+        ) from exc
+
+    raise _raise_http_error(
+        metrics=metrics,
+        endpoint=endpoint_name,
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="upstream request failed",
+        accounting_status="missing_usage",
+    ) from exc
 
 
 def _consume_sse_events(
@@ -334,48 +366,63 @@ def _request_timeout(config: AppConfig) -> httpx.Timeout:
 async def _proxy_streaming_response(
     *,
     request: Request,
+    routing_registry: RoutingRegistry,
     metrics: GatewayMetrics,
     upstream_streaming_http_client: httpx.AsyncClient,
     department: str,
     endpoint_name: str,
-    upstream_url: str,
+    upstream_base_url: str,
+    upstream_path: str,
+    upstream_name: str,
     upstream_authorization_token: str | None,
     payload: dict[str, Any],
     model_name: str,
     usage_extractor: UsageExtractor,
 ) -> Response:
-    request_headers = _build_upstream_headers(
-        request,
-        authorization_token=upstream_authorization_token,
-    )
+    attempted_upstream_names: set[str] = {upstream_name}
 
-    try:
-        upstream_request = upstream_streaming_http_client.build_request(
-            "POST",
-            upstream_url,
-            json=payload,
-            headers=request_headers,
+    while True:
+        request_headers = _build_upstream_headers(
+            request,
+            authorization_token=upstream_authorization_token,
         )
-        upstream_response = await upstream_streaming_http_client.send(
-            upstream_request,
-            stream=True,
-        )
-    except httpx.TimeoutException as exc:
-        raise _raise_http_error(
-            metrics=metrics,
-            endpoint=endpoint_name,
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="upstream request timed out",
-            accounting_status="missing_usage",
-        ) from exc
-    except httpx.HTTPError as exc:
-        raise _raise_http_error(
-            metrics=metrics,
-            endpoint=endpoint_name,
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="upstream request failed",
-            accounting_status="missing_usage",
-        ) from exc
+
+        try:
+            upstream_request = upstream_streaming_http_client.build_request(
+                "POST",
+                f"{upstream_base_url}{upstream_path}",
+                json=payload,
+                headers=request_headers,
+            )
+            upstream_response = await upstream_streaming_http_client.send(
+                upstream_request,
+                stream=True,
+            )
+            break
+        except httpx.HTTPError as exc:
+            if _is_connect_stage_retryable_error(exc):
+                try:
+                    upstream_base_url, upstream_authorization_token, upstream_name = _select_upstream(
+                        routing_registry=routing_registry,
+                        model_name=model_name,
+                        metrics=metrics,
+                        endpoint_name=endpoint_name,
+                        excluded_upstream_names=attempted_upstream_names,
+                    )
+                except HTTPException:
+                    _raise_upstream_transport_error(
+                        metrics=metrics,
+                        endpoint_name=endpoint_name,
+                        exc=exc,
+                    )
+                attempted_upstream_names.add(upstream_name)
+                continue
+
+            _raise_upstream_transport_error(
+                metrics=metrics,
+                endpoint_name=endpoint_name,
+                exc=exc,
+            )
 
     if upstream_response.status_code >= 400:
         set_request_metrics_failure_origin(request, failure_origin="upstream")
@@ -507,7 +554,7 @@ async def proxy_json_endpoint(
         metrics=metrics,
         endpoint_name=endpoint_name,
     )
-    upstream_base_url, upstream_authorization_token = _select_upstream(
+    upstream_base_url, upstream_authorization_token, upstream_name = _select_upstream(
         routing_registry=routing_registry,
         model_name=model_name,
         metrics=metrics,
@@ -517,43 +564,60 @@ async def proxy_json_endpoint(
     if payload.get("stream") is True:
         return await _proxy_streaming_response(
             request=request,
+            routing_registry=routing_registry,
             metrics=metrics,
             upstream_streaming_http_client=upstream_streaming_http_client,
             department=department,
             endpoint_name=endpoint_name,
-            upstream_url=f"{upstream_base_url}{upstream_path}",
+            upstream_base_url=upstream_base_url,
+            upstream_path=upstream_path,
+            upstream_name=upstream_name,
             upstream_authorization_token=upstream_authorization_token,
             payload=payload,
             model_name=model_name,
             usage_extractor=usage_extractor,
         )
 
-    try:
-        upstream_response = await upstream_http_client.post(
-            f"{upstream_base_url}{upstream_path}",
-            json=payload,
-            headers=_build_upstream_headers(
-                request,
-                authorization_token=upstream_authorization_token,
-            ),
-            timeout=_request_timeout(config),
-        )
-    except httpx.TimeoutException as exc:
-        raise _raise_http_error(
-            metrics=metrics,
-            endpoint=endpoint_name,
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="upstream request timed out",
-            accounting_status="missing_usage",
-        ) from exc
-    except httpx.HTTPError as exc:
-        raise _raise_http_error(
-            metrics=metrics,
-            endpoint=endpoint_name,
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="upstream request failed",
-            accounting_status="missing_usage",
-        ) from exc
+    attempted_upstream_names = {upstream_name}
+    request_timeout = _request_timeout(config)
+
+    while True:
+        try:
+            upstream_response = await upstream_http_client.post(
+                f"{upstream_base_url}{upstream_path}",
+                json=payload,
+                headers=_build_upstream_headers(
+                    request,
+                    authorization_token=upstream_authorization_token,
+                ),
+                timeout=request_timeout,
+            )
+            break
+        except httpx.HTTPError as exc:
+            if _is_connect_stage_retryable_error(exc):
+                try:
+                    upstream_base_url, upstream_authorization_token, upstream_name = _select_upstream(
+                        routing_registry=routing_registry,
+                        model_name=model_name,
+                        metrics=metrics,
+                        endpoint_name=endpoint_name,
+                        excluded_upstream_names=attempted_upstream_names,
+                    )
+                except HTTPException:
+                    _raise_upstream_transport_error(
+                        metrics=metrics,
+                        endpoint_name=endpoint_name,
+                        exc=exc,
+                    )
+
+                attempted_upstream_names.add(upstream_name)
+                continue
+
+            _raise_upstream_transport_error(
+                metrics=metrics,
+                endpoint_name=endpoint_name,
+                exc=exc,
+            )
 
     if upstream_response.status_code >= 400:
         set_request_metrics_failure_origin(request, failure_origin="upstream")

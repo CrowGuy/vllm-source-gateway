@@ -90,7 +90,12 @@ class RoutingRegistry:
                 raise RoutingError(f"unknown upstream '{upstream_name}'")
             self._health_by_name[upstream_name] = healthy
 
-    def select_upstream(self, model_name: str) -> SelectedUpstream:
+    def select_upstream(
+        self,
+        model_name: str,
+        *,
+        excluded_upstream_names: set[str] | None = None,
+    ) -> SelectedUpstream:
         with self._lock:
             upstreams = self._model_to_upstreams.get(model_name)
             if upstreams is None:
@@ -98,12 +103,15 @@ class RoutingRegistry:
 
             pool_size = len(upstreams)
             start_index = self._round_robin_index[model_name] % pool_size
+            excluded_names = excluded_upstream_names or set()
 
             selected = None
             selected_index = None
             for offset in range(pool_size):
                 candidate_index = (start_index + offset) % pool_size
                 candidate = upstreams[candidate_index]
+                if candidate.name in excluded_names:
+                    continue
                 if not self._health_by_name.get(candidate.name, False):
                     continue
                 selected = candidate
