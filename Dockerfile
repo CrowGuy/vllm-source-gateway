@@ -18,9 +18,17 @@ FROM python:3.12-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+ARG APP_UID=10001
+ARG APP_GID=10001
+
 WORKDIR /app
 
 COPY --from=builder /usr/local /usr/local
+
+RUN groupadd --gid "${APP_GID}" app && \
+    useradd --uid "${APP_UID}" --gid app --create-home --shell /usr/sbin/nologin app
+
+USER app:app
 
 EXPOSE 8080
 

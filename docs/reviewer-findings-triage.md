@@ -282,6 +282,19 @@ Result:
 - multi-replica model pools can tolerate one connect-stage upstream failure without immediately returning `502` or `504`
 - the current behavior is narrower and safer than a full retry system while still improving availability
 
+### container runtime no longer runs as root
+
+Current state:
+
+- the production container image now creates a dedicated non-root application user
+- the runtime container now executes as that non-root user by default
+- the current baseline continues to bind to port `8080`, so no privileged port access is required
+
+Result:
+
+- the production runtime follows a safer least-privilege container baseline
+- a gateway compromise would have less filesystem and process-level authority inside the container than a root-based runtime
+
 ## Should Clarify Now
 
 ## Next Hardening Batch
@@ -310,20 +323,6 @@ Current state:
 Result:
 
 - production deployments no longer need to store real department API keys directly in repo-tracked YAML files
-
-### container runtime still runs as root
-
-Reviewer observation:
-
-- valid
-
-Current state:
-
-- the runtime container still executes as root
-
-Recommended next action:
-
-- add a non-root runtime user in the production container image
 
 ### container healthcheck is still missing
 
@@ -439,13 +438,8 @@ Action:
 
 Recommended next implementation order:
 
-1. clarify single-process contract in docs
-2. concurrent upstream health probing
-3. connect-stage same-model failover
-4. non-root container runtime
-5. Docker or Compose healthcheck
-6. observability scope clarification for non-proxy routes
-7. optional SSE buffer bound hardening
+1. Docker or Compose healthcheck
+2. optional SSE buffer bound hardening
 
 ## Assumptions
 

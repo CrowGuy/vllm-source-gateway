@@ -407,6 +407,8 @@ Operational recommendation:
 - use a modern Linux host with a current Docker Engine / Compose runtime
 - do not treat very old Docker Compose or host OS versions as a supported baseline
 - if possible, validate the exact image tag on the target host before declaring it production-ready
+- the production container now runs as a dedicated non-root application user
+- mounted config files such as `config.prod.yaml` should remain readable by that runtime user
 - expose `/metrics` only to internal Prometheus or trusted internal network paths
 
 If the deployment environment is constrained, prefer moving a tested image to a newer host over
