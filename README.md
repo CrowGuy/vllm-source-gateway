@@ -94,6 +94,7 @@ For MVP, this means:
 
 - keep the client connection open while upstream vLLM streams data
 - forward upstream chunks/events to the client without unnecessary response rewriting
+- keep SSE usage parsing bounded so malformed upstream streams cannot grow decode buffers without limit
 - finalize request metrics only when the stream completes or fails clearly
 
 The gateway is part of the response path. It does not generate model output, but it does proxy both non-streaming and streaming responses from vLLM.
@@ -205,6 +206,7 @@ Configuration areas should include:
 Current baseline:
 
 - `server.max_request_body_bytes` limits JSON proxy request bodies before parsing
+- `server.max_sse_decode_buffer_bytes` bounds in-memory SSE usage parsing state before the gateway disables further stream-usage parsing for that response
 - requests larger than the configured limit are rejected with `413`
 - departments may use inline `api_keys` for local development or `api_keys_from_env` for production secret handling
 - each department must declare exactly one of `api_keys` or `api_keys_from_env`

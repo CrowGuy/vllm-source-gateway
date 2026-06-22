@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import codecs
 import json
+import logging
 from typing import Any, Callable
 
 import httpx
@@ -20,6 +21,7 @@ from vllm_source_gateway.request_metrics import (
 from vllm_source_gateway.routing import NoHealthyUpstreamError, RoutingRegistry, UnknownModelError
 
 UsageExtractor = Callable[[dict[str, Any]], tuple[int, int] | None]
+logger = logging.getLogger("vllm_source_gateway.proxy")
 
 _HOP_BY_HOP_HEADERS = {
     "connection",
@@ -325,10 +327,14 @@ def _consume_sse_events(
     *,
     buffer: str,
     fragment: str,
+    max_buffer_bytes: int,
     usage_extractor: UsageExtractor,
     latest_usage: tuple[int, int] | None,
-) -> tuple[str, tuple[int, int] | None]:
+) -> tuple[str, tuple[int, int] | None, bool]:
     normalized_buffer = (buffer + fragment).replace("\r\n", "\n")
+
+    if len(normalized_buffer.encode("utf-8")) > max_buffer_bytes:
+        return "", latest_usage, True
 
     while "\n\n" in normalized_buffer:
         raw_event, normalized_buffer = normalized_buffer.split("\n\n", 1)
@@ -353,7 +359,7 @@ def _consume_sse_events(
         if usage is not None:
             latest_usage = usage
 
-    return normalized_buffer, latest_usage
+    return normalized_buffer, latest_usage, False
 
 
 def _request_timeout(config: AppConfig) -> httpx.Timeout:
@@ -366,6 +372,7 @@ def _request_timeout(config: AppConfig) -> httpx.Timeout:
 async def _proxy_streaming_response(
     *,
     request: Request,
+    config: AppConfig,
     routing_registry: RoutingRegistry,
     metrics: GatewayMetrics,
     upstream_streaming_http_client: httpx.AsyncClient,
@@ -380,6 +387,7 @@ async def _proxy_streaming_response(
     usage_extractor: UsageExtractor,
 ) -> Response:
     attempted_upstream_names: set[str] = {upstream_name}
+    max_sse_decode_buffer_bytes = config.server.max_sse_decode_buffer_bytes
 
     while True:
         request_headers = _build_upstream_headers(
@@ -431,6 +439,7 @@ async def _proxy_streaming_response(
         latest_usage: tuple[int, int] | None = None
         decode_buffer = ""
         parsing_enabled = True
+        accounting_status_override: str | None = None
         decoder = codecs.getincrementaldecoder("utf-8")()
         client_disconnected = False
         stream_failed = False
@@ -446,13 +455,28 @@ async def _proxy_streaming_response(
                         fragment = decoder.decode(chunk)
                     except UnicodeDecodeError:
                         parsing_enabled = False
+                        accounting_status_override = "parse_error"
                     else:
-                        decode_buffer, latest_usage = _consume_sse_events(
+                        decode_buffer, latest_usage, buffer_overflowed = _consume_sse_events(
                             buffer=decode_buffer,
                             fragment=fragment,
+                            max_buffer_bytes=max_sse_decode_buffer_bytes,
                             usage_extractor=usage_extractor,
                             latest_usage=latest_usage,
                         )
+                        if buffer_overflowed:
+                            parsing_enabled = False
+                            decode_buffer = ""
+                            accounting_status_override = "parse_error"
+                            logger.warning(
+                                "disabled stream usage parsing after SSE decode buffer exceeded limit",
+                                extra={
+                                    "endpoint": endpoint_name,
+                                    "model_name": model_name,
+                                    "max_sse_decode_buffer_bytes": max_sse_decode_buffer_bytes,
+                                    "upstream_name": upstream_name,
+                                },
+                            )
 
                 yield chunk
 
@@ -461,13 +485,17 @@ async def _proxy_streaming_response(
                     final_fragment = decoder.decode(b"", final=True)
                 except UnicodeDecodeError:
                     parsing_enabled = False
+                    accounting_status_override = "parse_error"
                 else:
-                    decode_buffer, latest_usage = _consume_sse_events(
+                    decode_buffer, latest_usage, buffer_overflowed = _consume_sse_events(
                         buffer=decode_buffer,
                         fragment=final_fragment,
+                        max_buffer_bytes=max_sse_decode_buffer_bytes,
                         usage_extractor=usage_extractor,
                         latest_usage=latest_usage,
                     )
+                    if buffer_overflowed:
+                        accounting_status_override = "parse_error"
         except asyncio.CancelledError:
             client_disconnected = True
             raise
@@ -492,6 +520,13 @@ async def _proxy_streaming_response(
                 metrics.record_token_accounting(
                     endpoint=endpoint_name,
                     accounting_status="missing_usage",
+                )
+                return
+
+            if accounting_status_override is not None:
+                metrics.record_token_accounting(
+                    endpoint=endpoint_name,
+                    accounting_status=accounting_status_override,
                 )
                 return
 
@@ -564,6 +599,7 @@ async def proxy_json_endpoint(
     if payload.get("stream") is True:
         return await _proxy_streaming_response(
             request=request,
+            config=config,
             routing_registry=routing_registry,
             metrics=metrics,
             upstream_streaming_http_client=upstream_streaming_http_client,

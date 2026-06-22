@@ -308,6 +308,19 @@ Result:
 - the container runtime can now distinguish a merely running process from a container that is failing its basic liveness contract
 - production deployments now have a clearer baseline signal for container health without tying restart posture directly to upstream readiness
 
+### SSE decode buffer is now bounded
+
+Current state:
+
+- streaming SSE parsing now enforces `server.max_sse_decode_buffer_bytes`
+- if the decode buffer limit is exceeded, the gateway disables further stream-usage parsing for that response instead of letting the buffer grow indefinitely
+- stream pass-through continues so the caller can still receive model output, but token accounting falls back to conservative `parse_error` behavior
+
+Result:
+
+- malformed or pathological upstream SSE streams can no longer grow the gateway decode buffer without limit
+- the gateway keeps the client stream alive when possible while still protecting process memory and preserving conservative accounting semantics
+
 ## Should Clarify Now
 
 ## Next Hardening Batch
@@ -336,20 +349,6 @@ Current state:
 Result:
 
 - production deployments no longer need to store real department API keys directly in repo-tracked YAML files
-
-### SSE decode buffer still has no explicit upper bound
-
-Reviewer observation:
-
-- valid
-
-Current state:
-
-- streaming SSE parsing still allows unbounded decode-buffer growth if an upstream never terminates events correctly
-
-Recommended next action:
-
-- add a reasonable guardrail for decode-buffer growth as a targeted hardening step
 
 ### dead code and unreachable branches are cleaned up
 
@@ -436,7 +435,7 @@ Action:
 
 Recommended next implementation order:
 
-1. optional SSE buffer bound hardening
+- no immediate hardening items remain in the current triage batch
 
 ## Assumptions
 
