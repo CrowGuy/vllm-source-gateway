@@ -11,5 +11,17 @@ services:
       - .env.prod
     environment:
       VLLM_SOURCE_GATEWAY_CONFIG: /app/config.prod.yaml
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import sys, urllib.request;
+          sys.exit(0 if urllib.request.urlopen("http://127.0.0.1:8080/livez", timeout=2).getcode() == 200 else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     volumes:
       - ./config.prod.yaml:/app/config.prod.yaml:ro

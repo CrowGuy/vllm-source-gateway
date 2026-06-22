@@ -408,6 +408,8 @@ Operational recommendation:
 - do not treat very old Docker Compose or host OS versions as a supported baseline
 - if possible, validate the exact image tag on the target host before declaring it production-ready
 - the production container now runs as a dedicated non-root application user
+- the production Compose definition now includes a container-level healthcheck against `/livez`
+- keep `/readyz` as the stronger service-readiness signal for upstream availability checks
 - mounted config files such as `config.prod.yaml` should remain readable by that runtime user
 - expose `/metrics` only to internal Prometheus or trusted internal network paths
 
@@ -450,6 +452,12 @@ After `docker compose up -d`, validate in this order:
 
 ```bash
 docker compose -f docker-compose.prod.yml ps
+```
+
+Optional container health detail:
+
+```bash
+docker inspect --format '{{json .State.Health}}' vllm-source-gateway
 ```
 
 2. recent gateway logs
@@ -528,6 +536,9 @@ Common deployment failures and first checks:
 - container restarts repeatedly
   - inspect `docker compose logs gateway`
   - inspect `docker ps -a` and `docker inspect <container_id>`
+- container is `unhealthy` while `/readyz` may still vary
+  - inspect `docker inspect --format '{{json .State.Health}}' <container_id>`
+  - verify `/livez` returns `200` from inside the deployment network path
 - older hosts show container `exit=139`
   - treat this as a runtime compatibility issue first
   - move the tested image to a newer host rather than debugging application logic first

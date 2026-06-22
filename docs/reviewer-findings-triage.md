@@ -295,6 +295,19 @@ Result:
 - the production runtime follows a safer least-privilege container baseline
 - a gateway compromise would have less filesystem and process-level authority inside the container than a root-based runtime
 
+### container healthcheck is now present
+
+Current state:
+
+- the production Compose definition now declares a container-level healthcheck
+- that healthcheck uses `/livez` as the liveness signal through an in-container Python probe
+- `/readyz` remains available as the stronger readiness signal for upstream availability and operator checks
+
+Result:
+
+- the container runtime can now distinguish a merely running process from a container that is failing its basic liveness contract
+- production deployments now have a clearer baseline signal for container health without tying restart posture directly to upstream readiness
+
 ## Should Clarify Now
 
 ## Next Hardening Batch
@@ -323,21 +336,6 @@ Current state:
 Result:
 
 - production deployments no longer need to store real department API keys directly in repo-tracked YAML files
-
-### container healthcheck is still missing
-
-Reviewer observation:
-
-- valid
-
-Current state:
-
-- Docker and Compose definitions do not yet declare a container-level healthcheck
-- `/livez` and `/readyz` already exist and can back that check
-
-Recommended next action:
-
-- add a container healthcheck using `/livez` or `/readyz`
 
 ### SSE decode buffer still has no explicit upper bound
 
@@ -438,8 +436,7 @@ Action:
 
 Recommended next implementation order:
 
-1. Docker or Compose healthcheck
-2. optional SSE buffer bound hardening
+1. optional SSE buffer bound hardening
 
 ## Assumptions
 
