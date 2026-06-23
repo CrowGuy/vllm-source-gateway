@@ -87,6 +87,14 @@ Current scope:
 - the gateway guarantees `POST /v1/responses` proxy compatibility for stateless request forwarding
 - the gateway does not currently guarantee full stateful Responses API semantics such as stored-response retrieval, `previous_response_id`, or `GET /v1/responses/{id}`
 
+Current validation and behavior:
+
+- `/v1/responses` is treated as a native stateless upstream proxy path
+- production validation has already confirmed:
+  - non-streaming and streaming `/v1/responses` behavior works against a real upstream
+  - tool-use parity for active real-caller scenarios works through the current proxy path
+- remaining follow-up work for `/v1/responses` is now about future compatibility prioritization, not basic path viability
+
 ### Anthropic Messages API
 
 The gateway also supports a native proxy path for `POST /v1/messages` so Anthropic-oriented callers can reach the same vLLM-backed model pool without a separate ingress.
@@ -108,7 +116,10 @@ Current validation and behavior:
 - beyond that minimal validation, request fields are passed through to upstream `/v1/messages`
 - upstream non-2xx `messages` responses are passed through raw when a response exists
 - unit and endpoint tests now cover native `/v1/messages` proxy behavior, header policy, usage accounting, and streaming pass-through
-- a production-like real-upstream validation pass for `/v1/messages`, including tool use, should be treated as the next validation milestone for this path
+- initial production validation has already confirmed:
+  - native `/v1/messages` streaming token accounting can reach `accounting_status="recorded"` with a real upstream
+  - production-like tool-use requests can complete successfully through the native `/v1/messages` path
+- remaining follow-up work for `/v1/messages` is now about broader edge coverage and long-term compatibility prioritization, not basic path viability
 
 Stateful semantics explicitly out of scope:
 
@@ -594,6 +605,366 @@ For one real-upstream validation flow using `gemma-4-31b`, see
 [docs/e2e-validation-gemma4.md](/home/randy/Documents/crow/vllm-source-gateway/docs/e2e-validation-gemma4.md).
 
 `/healthz` remains available as a backward-compatible alias for liveness.
+
+### `/v1/messages` Maintenance Checklist
+
+Use this checklist after upgrading vLLM, changing models, rotating upstreams, or handing the service to another maintainer.
+
+Set convenient shell variables first:
+
+```bash
+export GATEWAY_BASE_URL=http://127.0.0.1:8080
+export API_KEY=replace-me
+export MODEL_NAME=replace-me
+```
+
+#### 1. Validate native `/v1/messages` streaming token accounting
+
+Run one non-streaming `messages` request:
+
+```bash
+curl -sS \
+  -H "content-type: application/json" \
+  -H "x-api-key: ${API_KEY}" \
+  -H "anthropic-version: 2023-06-01" \
+  -X POST "${GATEWAY_BASE_URL}/v1/messages" \
+  --data "{
+    \"model\": \"${MODEL_NAME}\",
+    \"max_tokens\": 128,
+    \"messages\": [{\"role\": \"user\", \"content\": \"Reply with exactly: native messages path works.\"}]
+  }"
+```
+
+Run one streaming `messages` request:
+
+```bash
+curl -sS -N \
+  -H "content-type: application/json" \
+  -H "x-api-key: ${API_KEY}" \
+  -H "anthropic-version: 2023-06-01" \
+  -X POST "${GATEWAY_BASE_URL}/v1/messages" \
+  --data "{
+    \"model\": \"${MODEL_NAME}\",
+    \"max_tokens\": 128,
+    \"stream\": true,
+    \"messages\": [{\"role\": \"user\", \"content\": \"Count to 3 in one short line.\"}]
+  }"
+```
+
+Inspect metrics after the requests:
+
+```bash
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'gateway_http_requests_total{department='
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'endpoint="messages"'
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'gateway_token_accounting_total'
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'gateway_prompt_tokens_total'
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'gateway_generation_tokens_total'
+```
+
+Success criteria:
+
+- `gateway_http_requests_total{endpoint="messages",status_class="2xx"}` increases
+- `gateway_token_accounting_total{endpoint="messages",accounting_status="recorded"}` appears when upstream exposes reliable usage
+- `gateway_token_accounting_total{endpoint="messages",accounting_status="missing_usage"}` is acceptable only when upstream truly omits usage
+- `gateway_prompt_tokens_total` and `gateway_generation_tokens_total` increase only when usage is actually present
+- no unexpected `gateway_http_request_failures_total{endpoint="messages"}` is emitted
+
+Current status:
+
+- this validation has been completed successfully in production for the current upstream and model mix
+- rerun it after changing vLLM version, model deployment shape, or upstream event behavior
+
+#### 2. Validate production-like tool-use edge cases for `/v1/messages`
+
+Run a tool-enabled non-streaming request:
+
+```bash
+curl -sS \
+  -H "content-type: application/json" \
+  -H "x-api-key: ${API_KEY}" \
+  -H "anthropic-version: 2023-06-01" \
+  -X POST "${GATEWAY_BASE_URL}/v1/messages" \
+  --data "{
+    \"model\": \"${MODEL_NAME}\",
+    \"max_tokens\": 256,
+    \"tools\": [{
+      \"name\": \"get_weather\",
+      \"description\": \"Return a fake weather report.\",
+      \"input_schema\": {
+        \"type\": \"object\",
+        \"properties\": {
+          \"city\": {\"type\": \"string\"}
+        },
+        \"required\": [\"city\"]
+      }
+    }],
+    \"messages\": [{\"role\": \"user\", \"content\": \"What is the weather in Taipei? Use the tool.\"}]
+  }"
+```
+
+Run a streaming tool-enabled request:
+
+```bash
+curl -sS -N \
+  -H "content-type: application/json" \
+  -H "x-api-key: ${API_KEY}" \
+  -H "anthropic-version: 2023-06-01" \
+  -X POST "${GATEWAY_BASE_URL}/v1/messages" \
+  --data "{
+    \"model\": \"${MODEL_NAME}\",
+    \"max_tokens\": 256,
+    \"stream\": true,
+    \"tools\": [{
+      \"name\": \"get_weather\",
+      \"description\": \"Return a fake weather report.\",
+      \"input_schema\": {
+        \"type\": \"object\",
+        \"properties\": {
+          \"city\": {\"type\": \"string\"}
+        },
+        \"required\": [\"city\"]
+      }
+    }],
+    \"messages\": [{\"role\": \"user\", \"content\": \"What is the weather in Taipei? Use the tool.\"}]
+  }"
+```
+
+Optional raw upstream comparison:
+
+```bash
+curl -sS \
+  -H "content-type: application/json" \
+  -H "authorization: Bearer ${UPSTREAM_TOKEN}" \
+  -H "anthropic-version: 2023-06-01" \
+  -X POST "${UPSTREAM_BASE_URL}/v1/messages" \
+  --data "{
+    \"model\": \"${MODEL_NAME}\",
+    \"max_tokens\": 256,
+    \"tools\": [{
+      \"name\": \"get_weather\",
+      \"description\": \"Return a fake weather report.\",
+      \"input_schema\": {
+        \"type\": \"object\",
+        \"properties\": {
+          \"city\": {\"type\": \"string\"}
+        },
+        \"required\": [\"city\"]
+      }
+    }],
+    \"messages\": [{\"role\": \"user\", \"content\": \"What is the weather in Taipei? Use the tool.\"}]
+  }"
+```
+
+Inspect metrics:
+
+```bash
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'gateway_http_requests_total{department='
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'gateway_source_resolution_total'
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'gateway_http_request_failures_total'
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'endpoint="messages"'
+```
+
+Success criteria:
+
+- tool-enabled requests succeed through the gateway without request-shape rewriting failures
+- tool-related responses or stream events look materially the same as direct upstream behavior
+- `gateway_source_resolution_total` increments for the expected department
+- upstream-side tool schema errors are passed through as upstream-origin failures instead of being rewritten by the gateway
+- no unexpected gateway-origin `4xx` or `5xx` appears for the happy path
+
+Current status:
+
+- this validation has been completed successfully in production for the current upstream and model mix
+- rerun it after upgrading vLLM, enabling new tool-calling models, or changing upstream auth / routing behavior
+
+### `/v1/responses` Production Validation and Tool-Use Parity Checklist
+
+Use this checklist when `/v1/responses` is a real caller path for code agents and you want parity confidence comparable to `/v1/messages`.
+
+Set the same shell variables first:
+
+```bash
+export GATEWAY_BASE_URL=http://127.0.0.1:8080
+export API_KEY=replace-me
+export MODEL_NAME=replace-me
+```
+
+#### 1. Validate `/v1/responses` non-streaming and streaming parity
+
+Run one non-streaming `responses` request:
+
+```bash
+curl -sS \
+  -H "content-type: application/json" \
+  -H "x-api-key: ${API_KEY}" \
+  -X POST "${GATEWAY_BASE_URL}/v1/responses" \
+  --data "{
+    \"model\": \"${MODEL_NAME}\",
+    \"input\": \"Reply with exactly: responses path works.\"
+  }"
+```
+
+Run one streaming `responses` request:
+
+```bash
+curl -sS -N \
+  -H "content-type: application/json" \
+  -H "x-api-key: ${API_KEY}" \
+  -X POST "${GATEWAY_BASE_URL}/v1/responses" \
+  --data "{
+    \"model\": \"${MODEL_NAME}\",
+    \"input\": \"Count to 3 in one short line.\",
+    \"stream\": true
+  }"
+```
+
+Inspect metrics:
+
+```bash
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'endpoint="responses"'
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'gateway_http_requests_total{department='
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'gateway_token_accounting_total'
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'gateway_prompt_tokens_total'
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'gateway_generation_tokens_total'
+```
+
+Success criteria:
+
+- `gateway_http_requests_total{endpoint="responses",status_class="2xx"}` increases
+- `gateway_token_accounting_total{endpoint="responses"}` shows either `recorded` or `missing_usage` in a way that matches real upstream behavior
+- if upstream exposes reliable usage, `gateway_prompt_tokens_total` and `gateway_generation_tokens_total` increase
+- if upstream omits usage, the gateway falls back to `missing_usage` without guessing token counts
+- no unexpected `gateway_http_request_failures_total{endpoint="responses"}` is emitted
+
+Current status:
+
+- this validation has been completed successfully in production for the current upstream and model mix
+- rerun it after upgrading vLLM, changing `/v1/responses` callers, or modifying upstream event behavior
+
+#### 2. Validate `/v1/responses` tool-use parity
+
+Run a tool-enabled non-streaming `responses` request:
+
+```bash
+curl -sS \
+  -H "content-type: application/json" \
+  -H "x-api-key: ${API_KEY}" \
+  -X POST "${GATEWAY_BASE_URL}/v1/responses" \
+  --data "{
+    \"model\": \"${MODEL_NAME}\",
+    \"input\": \"What is the weather in Taipei? Use the tool.\",
+    \"tools\": [{
+      \"type\": \"function\",
+      \"name\": \"get_weather\",
+      \"description\": \"Return a fake weather report.\",
+      \"parameters\": {
+        \"type\": \"object\",
+        \"properties\": {
+          \"city\": {\"type\": \"string\"}
+        },
+        \"required\": [\"city\"]
+      }
+    }]
+  }"
+```
+
+Run a streaming tool-enabled `responses` request:
+
+```bash
+curl -sS -N \
+  -H "content-type: application/json" \
+  -H "x-api-key: ${API_KEY}" \
+  -X POST "${GATEWAY_BASE_URL}/v1/responses" \
+  --data "{
+    \"model\": \"${MODEL_NAME}\",
+    \"input\": \"What is the weather in Taipei? Use the tool.\",
+    \"stream\": true,
+    \"tools\": [{
+      \"type\": \"function\",
+      \"name\": \"get_weather\",
+      \"description\": \"Return a fake weather report.\",
+      \"parameters\": {
+        \"type\": \"object\",
+        \"properties\": {
+          \"city\": {\"type\": \"string\"}
+        },
+        \"required\": [\"city\"]
+      }
+    }]
+  }"
+```
+
+Optional raw upstream comparison:
+
+```bash
+curl -sS \
+  -H "content-type: application/json" \
+  -H "authorization: Bearer ${UPSTREAM_TOKEN}" \
+  -X POST "${UPSTREAM_BASE_URL}/v1/responses" \
+  --data "{
+    \"model\": \"${MODEL_NAME}\",
+    \"input\": \"What is the weather in Taipei? Use the tool.\",
+    \"tools\": [{
+      \"type\": \"function\",
+      \"name\": \"get_weather\",
+      \"description\": \"Return a fake weather report.\",
+      \"parameters\": {
+        \"type\": \"object\",
+        \"properties\": {
+          \"city\": {\"type\": \"string\"}
+        },
+        \"required\": [\"city\"]
+      }
+    }]
+  }"
+```
+
+Inspect metrics:
+
+```bash
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'endpoint="responses"'
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'gateway_source_resolution_total'
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'gateway_http_request_failures_total'
+```
+
+Success criteria:
+
+- tool-enabled `/v1/responses` requests succeed without gateway-side request-shape rewriting failures
+- streamed or non-streamed tool-related response shapes look materially the same as direct upstream behavior
+- `gateway_source_resolution_total` increments for the expected department
+- upstream-side tool schema errors are passed through as upstream-origin failures instead of being rewritten by the gateway
+- no unexpected gateway-origin `4xx` or `5xx` appears for the happy path
+
+Current status:
+
+- this validation has been completed successfully in production for the current upstream and model mix
+- rerun it after enabling new tool-calling models, changing `/v1/responses` clients, or modifying upstream auth / routing behavior
+
+#### 3. Revisit whether `/v1/responses` or another compatibility path needs the next investment first
+
+This is a release or maintenance review step rather than a single curl command.
+
+Collect evidence from current traffic and validations:
+
+```bash
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'endpoint="chat_completions"'
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'endpoint="responses"'
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'endpoint="messages"'
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'gateway_http_request_failures_total'
+curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'gateway_token_accounting_total'
+```
+
+Decision checklist:
+
+- if `/v1/responses` is the dominant code-agent path and still has compatibility gaps, prioritize `/v1/responses`
+- if `/v1/messages` traffic is rising but accounting or tool-use edge cases remain uncertain, keep investing in `/v1/messages`
+- if the main remaining issues are metrics confidence rather than API shape, invest in observability hardening before adding another compatibility path
+- if a new caller population depends on a different surface, document that demand before expanding the gateway contract
+
+Success criteria:
+
+- the next compatibility investment target is chosen based on observed traffic, known failures, and maintainer evidence rather than guesswork
+- the decision is recorded in docs, triage notes, or the next roadmap item before new API-surface work begins
 
 ## Interop Contract with `vllm-usage-observability`
 

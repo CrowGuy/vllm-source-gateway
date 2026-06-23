@@ -3,6 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: vllm-source-gateway
     image: vllm-source-gateway:prod
     restart: unless-stopped
     ports:

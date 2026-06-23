@@ -372,6 +372,33 @@ Result:
 - Anthropic-oriented callers now use the upstream `messages` capability directly instead of a gateway-defined translation layer
 - tool use and other provider-native `messages` semantics can now track upstream behavior much more closely
 
+### initial real-upstream `/v1/messages` production validation is completed
+
+Current state:
+
+- `/v1/messages` has been exercised successfully on a production machine against a real upstream
+- the primary native-proxy request path is no longer only a local or mock-backed implementation claim
+- native `/v1/messages` streaming token accounting has also been validated against real upstream behavior
+- production-like tool-use edge-case validation has been completed for the current upstream and model mix
+
+Result:
+
+- the current `/v1/messages` path has crossed the initial real-environment validation bar
+- remaining follow-up work now focuses on broader compatibility prioritization rather than the existence of the basic native proxy path
+
+### initial real-upstream `/v1/responses` production validation is completed
+
+Current state:
+
+- `/v1/responses` has been exercised successfully on a production machine against a real upstream
+- non-streaming and streaming `/v1/responses` behavior has been validated for the current upstream and model mix
+- tool-use parity has been validated for the active real-caller scenarios currently using `/v1/responses`
+
+Result:
+
+- the current `/v1/responses` path has crossed the initial real-environment validation bar
+- remaining follow-up work now focuses on future compatibility prioritization rather than the existence of the basic proxy path
+
 ## Next Hardening Batch
 
 - no immediate hardening items remain in the current reviewer-driven batch
@@ -462,18 +489,15 @@ Action:
 
 These are the most natural follow-up items after the current hardening and native-messages work:
 
-1. run a real-upstream, production-like E2E validation pass for `POST /v1/messages`
-2. validate native `/v1/messages` streaming token accounting against real upstream behavior and harden if needed
-3. add production-like tool-use validation scenarios for `/v1/messages`
-4. revisit whether `/v1/responses` or `/v1/messages` needs the next compatibility investment first
+1. revisit whether `/v1/responses` or another compatibility path needs the next investment first
 
 ## Suggested Next Order
 
 Recommended next implementation order:
 
-1. run real-upstream `/v1/messages` validation
-2. validate native `/v1/messages` streaming token accounting against real upstream behavior
-3. decide the next compatibility expansion target based on real callers
+1. decide the next compatibility investment target based on real callers
+2. update roadmap or triage docs before expanding another API surface
+3. keep production validation checklists current as caller mix changes
 
 ## Assumptions
 
