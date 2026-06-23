@@ -30,7 +30,8 @@ uv sync --extra dev
 - The upstream supports:
   - `POST /v1/chat/completions`
   - `POST /v1/responses`
-- The recorded validation run in this document predates native `/v1/messages` proxy validation and therefore does not yet serve as real-upstream proof for Anthropic-compatible ingress behavior.
+- This document records the original smallest real-upstream `gemma-4-31b` E2E flow.
+- Additional real-upstream production validation for native `POST /v1/messages` and production-like `/v1/responses` tool-use parity has been completed separately after this script-backed run.
 - The gateway and vLLM are on the same host if you use `http://127.0.0.1:8000`.
 - The gateway Python dependencies are installed locally.
 
@@ -70,10 +71,10 @@ The validation script checks:
 9. streaming responses pass-through
 10. unknown department fallback
 
-Current omission:
+Current scope note:
 
-- this recorded E2E flow does **not yet** validate `POST /v1/messages`
-- once native `/v1/messages` proxying is validated against a real upstream, this document should either be extended or split into a dedicated messages-focused E2E record
+- this script-backed `gemma-4-31b` flow remains focused on `chat/completions` and `responses`
+- native `POST /v1/messages` production validation exists today, but it is documented as part of the current production validation and maintenance workflow rather than this older shell-script path
 
 ## How To Run
 
@@ -116,6 +117,13 @@ Validated successfully:
 - streaming responses success
 - unknown department fallback success
 
+Additional real-upstream validation completed after this recorded run:
+
+- native `POST /v1/messages` non-streaming and streaming behavior has been validated in production
+- native `/v1/messages` streaming token accounting has been validated against real upstream behavior
+- production-like tool-use edge-case validation has been completed for `/v1/messages`
+- `/v1/responses` tool-use parity has also been validated for the active real-caller scenarios using that path
+
 ## Result Interpretation
 
 This result means the MVP core request path has been validated against a real upstream service,
@@ -124,6 +132,10 @@ not only mocks or unit tests.
 It also confirms that token accounting observed reliable usage during the validation run, because
 the metrics scrape detected prompt token counters from real traffic.
 
+Taken together with the later production checks, the current compatibility surface
+for `POST /v1/chat/completions`, `POST /v1/responses`, and `POST /v1/messages`
+has crossed the initial real-environment validation bar.
+
 This validation does not mean the gateway has already been verified for:
 
 - multi-upstream round-robin
@@ -131,7 +143,7 @@ This validation does not mean the gateway has already been verified for:
 - Docker packaging
 - production deployment topology
 - timeout or failure injection scenarios
-- real-upstream native `/v1/messages` behavior
+- high-concurrency capacity characterization under the single-process baseline
 
 ## Expected Outputs
 
@@ -179,14 +191,8 @@ This validation did not cover:
 - timeout injection
 - failure injection
 - containerized deployment path
-- `POST /v1/messages` against a real upstream
+- release-gate, rollback, and runbook validation that now belongs to the launch-stability follow-up work
 
-## Next `/v1/messages` Validation Checklist
-
-The next real-upstream validation pass should add:
-
-1. direct upstream `POST /v1/messages` smoke check
-2. gateway `POST /v1/messages` non-streaming smoke check
-3. gateway `POST /v1/messages` streaming smoke check
-4. at least one tool-use request through gateway `POST /v1/messages`
-5. metrics scrape after `messages` requests to confirm bounded labels and conservative accounting
+For current `messages` and `responses` production validation steps, use the
+maintenance checklists in
+[README.md](/home/randy/Documents/crow/vllm-source-gateway/README.md).

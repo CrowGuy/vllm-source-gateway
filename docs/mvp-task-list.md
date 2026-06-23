@@ -2,7 +2,14 @@
 
 ## Purpose
 
-This document turns the current MVP decisions in [README.md](/home/randy/Documents/crow/vllm-source-gateway/README.md) into an implementation-oriented task list for `vllm-source-gateway`.
+This document records the original implementation-oriented MVP task list for
+`vllm-source-gateway`.
+
+Current source of truth:
+
+- [README.md](/home/randy/Documents/crow/vllm-source-gateway/README.md) defines the current public contract.
+- [docs/reviewer-findings-triage.md](/home/randy/Documents/crow/vllm-source-gateway/docs/reviewer-findings-triage.md) tracks completed hardening and next launch-stability work.
+- The current compatibility surface is intentionally frozen at `POST /v1/chat/completions`, `POST /v1/responses`, and `POST /v1/messages`.
 
 The goal is to provide a practical development sequence for:
 
@@ -18,7 +25,8 @@ The goal is to provide a practical development sequence for:
 - MVP supports `POST /v1/chat/completions`
 - MVP supports `GET /v1/models`
 - MVP supports `POST /v1/responses`
-- MVP supports streaming pass-through for chat completions
+- MVP supports `POST /v1/messages` as a native upstream proxy path
+- MVP supports streaming pass-through for chat completions, responses, and messages
 - source resolution is `API key -> department -> unknown`
 - routing is model-aware round-robin across healthy upstreams
 - token accounting is conservative
@@ -45,10 +53,11 @@ The recommended order is:
 4. model discovery endpoint
 5. chat completions proxy
 6. responses proxy
-7. source resolution
-8. metrics and token accounting
-9. streaming pass-through
-10. end-to-end validation
+7. messages proxy
+8. source resolution
+9. metrics and token accounting
+10. streaming pass-through
+11. end-to-end validation
 
 This order keeps the critical path simple: build a working gateway first, then add attribution, metrics, and streaming complexity in controlled steps.
 
@@ -179,7 +188,28 @@ Done when:
 - code-agent-style clients do not need a separate compatibility endpoint
 - upstream success and failure paths are visible and consistent
 
-### 7. Source Resolution
+### 7. Messages Proxy
+
+Goal:
+
+- provide a native `POST /v1/messages` proxy path for Anthropic-oriented callers
+
+Tasks:
+
+- implement `POST /v1/messages`
+- validate only the request shape needed by the gateway
+- extract the requested `model_name`
+- forward the request to the selected vLLM upstream `/v1/messages`
+- pass upstream responses and upstream errors through without gateway-side Anthropic reshaping
+- handle upstream timeout and connection failure paths consistently with other proxy routes
+
+Done when:
+
+- a client can submit a messages request through the gateway
+- tool-use and provider-native message semantics are delegated to upstream vLLM behavior
+- upstream success and failure paths are visible and consistent
+
+### 8. Source Resolution
 
 Goal:
 
@@ -200,7 +230,7 @@ Done when:
 - unmapped requests are visible as `unknown`
 - department labels remain bounded and stable
 
-### 8. Metrics and Token Accounting
+### 9. Metrics and Token Accounting
 
 Goal:
 
@@ -223,7 +253,7 @@ Done when:
 - token metrics are emitted only for reliable completed usage
 - missing accounting is visible rather than silently guessed
 
-### 9. Streaming Pass-Through
+### 10. Streaming Pass-Through
 
 Goal:
 
@@ -233,6 +263,7 @@ Tasks:
 
 - support streaming for `/v1/chat/completions`
 - support streaming for `/v1/responses` where applicable
+- support streaming for `/v1/messages` where applicable
 - keep the client connection open while upstream data arrives
 - forward upstream chunks/events as they are received
 - stop upstream work when the client disconnects if possible
@@ -242,10 +273,11 @@ Done when:
 
 - a streaming chat completion works through the gateway
 - a streaming responses request works through the gateway
+- a streaming messages request works through the gateway
 - the gateway does not need to fully buffer the response before forwarding
 - streaming success and failure paths remain observable
 
-### 10. End-to-End Validation
+### 11. End-to-End Validation
 
 Goal:
 
@@ -256,6 +288,7 @@ Tasks:
 - run the gateway against one or more vLLM upstreams
 - verify `GET /v1/models`
 - verify `POST /v1/responses`
+- verify `POST /v1/messages`
 - verify API-key-based department resolution
 - verify model-aware round-robin routing
 - verify required metrics appear on `/metrics`
@@ -278,11 +311,12 @@ The first implementation batch should open these issues:
 4. Implement read-only `GET /v1/models`
 5. Implement non-streaming `POST /v1/chat/completions` proxy
 6. Implement `POST /v1/responses` proxy for code-agent compatibility
-7. Implement API-key-to-department resolution
-8. Implement Prometheus metrics per contract
-9. Implement conservative token accounting
-10. Add streaming pass-through for chat completions and responses
-11. Add end-to-end validation checklist
+7. Implement native `POST /v1/messages` proxy for Anthropic-oriented callers
+8. Implement API-key-to-department resolution
+9. Implement Prometheus metrics per contract
+10. Implement conservative token accounting
+11. Add streaming pass-through for chat completions, responses, and messages
+12. Add end-to-end validation checklist
 
 ## Risks and Trade-Offs
 
@@ -300,6 +334,7 @@ Each milestone should be validated with the smallest useful check:
 - model discovery: `GET /v1/models` reflects the routing registry
 - proxy: a non-streaming request succeeds end-to-end
 - responses: a `/v1/responses` request succeeds end-to-end
+- messages: a `/v1/messages` request succeeds end-to-end
 - source resolution: API keys map to departments predictably
 - routing: requests rotate across healthy upstreams for one model
 - metrics: labels remain bounded and match the contract

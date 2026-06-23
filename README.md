@@ -93,7 +93,7 @@ Current validation and behavior:
 - production validation has already confirmed:
   - non-streaming and streaming `/v1/responses` behavior works against a real upstream
   - tool-use parity for active real-caller scenarios works through the current proxy path
-- remaining follow-up work for `/v1/responses` is now about future compatibility prioritization, not basic path viability
+- the current compatibility surface is intentionally frozen at `chat/completions`, `responses`, and `messages` while the project finishes launch-stability and operational hardening work
 
 ### Anthropic Messages API
 
@@ -119,7 +119,7 @@ Current validation and behavior:
 - initial production validation has already confirmed:
   - native `/v1/messages` streaming token accounting can reach `accounting_status="recorded"` with a real upstream
   - production-like tool-use requests can complete successfully through the native `/v1/messages` path
-- remaining follow-up work for `/v1/messages` is now about broader edge coverage and long-term compatibility prioritization, not basic path viability
+- the current compatibility surface is intentionally frozen at `chat/completions`, `responses`, and `messages` while the project finishes launch-stability and operational hardening work
 
 Stateful semantics explicitly out of scope:
 
@@ -940,7 +940,7 @@ Current status:
 - this validation has been completed successfully in production for the current upstream and model mix
 - rerun it after enabling new tool-calling models, changing `/v1/responses` clients, or modifying upstream auth / routing behavior
 
-#### 3. Revisit whether `/v1/responses` or another compatibility path needs the next investment first
+#### 3. Reconfirm compatibility freeze and stability-first priority
 
 This is a release or maintenance review step rather than a single curl command.
 
@@ -956,15 +956,15 @@ curl -sS "${GATEWAY_BASE_URL}/metrics" | grep 'gateway_token_accounting_total'
 
 Decision checklist:
 
-- if `/v1/responses` is the dominant code-agent path and still has compatibility gaps, prioritize `/v1/responses`
-- if `/v1/messages` traffic is rising but accounting or tool-use edge cases remain uncertain, keep investing in `/v1/messages`
-- if the main remaining issues are metrics confidence rather than API shape, invest in observability hardening before adding another compatibility path
-- if a new caller population depends on a different surface, document that demand before expanding the gateway contract
+- keep `POST /v1/chat/completions`, `POST /v1/responses`, and `POST /v1/messages` as the only supported compatibility paths for the current launch cycle
+- prioritize reliability, rollback safety, observability correctness, and operator runbooks before expanding the gateway contract
+- if a new caller population depends on another API surface, document that demand explicitly and treat it as a separate post-launch decision
+- if the main remaining issues are metrics confidence, deployment safety, or incident handling, invest there before adding another compatibility path
 
 Success criteria:
 
-- the next compatibility investment target is chosen based on observed traffic, known failures, and maintainer evidence rather than guesswork
-- the decision is recorded in docs, triage notes, or the next roadmap item before new API-surface work begins
+- the compatibility freeze is explicit in maintainer documentation
+- stability-first follow-up work is chosen based on observed failures, operational gaps, and maintainer evidence rather than guesswork
 
 ## Interop Contract with `vllm-usage-observability`
 

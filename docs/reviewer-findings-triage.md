@@ -262,7 +262,7 @@ Result:
 Current state:
 
 - README now states that the bounded metrics contract is optimized for source-attributed proxy traffic
-- `/v1/chat/completions` and `/v1/responses` are documented as the primary inputs for department-level request, token, and failure views
+- `/v1/chat/completions`, `/v1/responses`, and `/v1/messages` are documented as the primary inputs for department-level request, token, and failure views
 - `/v1/models`, `/livez`, `/readyz`, `/healthz`, `/metrics`, generic `404` responses, and some pre-proxy failures are explicitly documented as outside the current first-class source-attributed metrics contract
 
 Result:
@@ -384,7 +384,7 @@ Current state:
 Result:
 
 - the current `/v1/messages` path has crossed the initial real-environment validation bar
-- remaining follow-up work now focuses on broader compatibility prioritization rather than the existence of the basic native proxy path
+- the current compatibility surface is intentionally frozen at `chat/completions`, `responses`, and `messages` while the project finishes launch-stability and operational hardening work
 
 ### initial real-upstream `/v1/responses` production validation is completed
 
@@ -397,7 +397,7 @@ Current state:
 Result:
 
 - the current `/v1/responses` path has crossed the initial real-environment validation bar
-- remaining follow-up work now focuses on future compatibility prioritization rather than the existence of the basic proxy path
+- the current compatibility surface is intentionally frozen at `chat/completions`, `responses`, and `messages` while the project finishes launch-stability and operational hardening work
 
 ## Next Hardening Batch
 
@@ -487,17 +487,22 @@ Action:
 
 ### Next Phase Backlog
 
-These are the most natural follow-up items after the current hardening and native-messages work:
+These are the most natural follow-up items after the current hardening and native proxy work:
 
-1. revisit whether `/v1/responses` or another compatibility path needs the next investment first
+1. define a release gate and launch checklist for the frozen compatibility surface
+2. document rollback steps for image, config, and `.env.prod` changes
+3. add a support matrix for validated caller paths, tool use, and production-tested upstream behavior
+4. document an operator runbook for common readiness, routing, auth, and metrics failures
+5. establish a lightweight single-process capacity baseline for expected streaming and agent concurrency
 
 ## Suggested Next Order
 
 Recommended next implementation order:
 
-1. decide the next compatibility investment target based on real callers
-2. update roadmap or triage docs before expanding another API surface
-3. keep production validation checklists current as caller mix changes
+1. freeze the compatibility contract at `chat/completions`, `responses`, and `messages`
+2. add release gate, rollback, and runbook documentation before expanding any API surface
+3. keep production validation checklists current as caller mix, model mix, or upstream behavior changes
+4. only revisit new compatibility work after the launch-stability backlog is materially closed
 
 ## Assumptions
 
@@ -508,3 +513,4 @@ Recommended next implementation order:
 - `/metrics` is expected to be exposed only to internal Prometheus or trusted internal network paths
 - multi-worker support is not part of the current contract
 - horizontal scaling remains a future architecture topic, not a present guarantee
+- the current launch cycle intentionally freezes compatibility scope at `POST /v1/chat/completions`, `POST /v1/responses`, and `POST /v1/messages`
