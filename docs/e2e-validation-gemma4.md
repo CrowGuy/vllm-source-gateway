@@ -30,6 +30,7 @@ uv sync --extra dev
 - The upstream supports:
   - `POST /v1/chat/completions`
   - `POST /v1/responses`
+- The recorded validation run in this document predates native `/v1/messages` proxy validation and therefore does not yet serve as real-upstream proof for Anthropic-compatible ingress behavior.
 - The gateway and vLLM are on the same host if you use `http://127.0.0.1:8000`.
 - The gateway Python dependencies are installed locally.
 
@@ -68,6 +69,11 @@ The validation script checks:
 8. streaming chat pass-through
 9. streaming responses pass-through
 10. unknown department fallback
+
+Current omission:
+
+- this recorded E2E flow does **not yet** validate `POST /v1/messages`
+- once native `/v1/messages` proxying is validated against a real upstream, this document should either be extended or split into a dedicated messages-focused E2E record
 
 ## How To Run
 
@@ -125,6 +131,7 @@ This validation does not mean the gateway has already been verified for:
 - Docker packaging
 - production deployment topology
 - timeout or failure injection scenarios
+- real-upstream native `/v1/messages` behavior
 
 ## Expected Outputs
 
@@ -172,3 +179,14 @@ This validation did not cover:
 - timeout injection
 - failure injection
 - containerized deployment path
+- `POST /v1/messages` against a real upstream
+
+## Next `/v1/messages` Validation Checklist
+
+The next real-upstream validation pass should add:
+
+1. direct upstream `POST /v1/messages` smoke check
+2. gateway `POST /v1/messages` non-streaming smoke check
+3. gateway `POST /v1/messages` streaming smoke check
+4. at least one tool-use request through gateway `POST /v1/messages`
+5. metrics scrape after `messages` requests to confirm bounded labels and conservative accounting

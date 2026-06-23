@@ -24,6 +24,7 @@ from vllm_source_gateway.request_metrics import (
 )
 from vllm_source_gateway.routers.chat_completions import router as chat_completions_router
 from vllm_source_gateway.routers.health import router as health_router
+from vllm_source_gateway.routers.messages import router as messages_router
 from vllm_source_gateway.routers.models import router as models_router
 from vllm_source_gateway.routers.responses import router as responses_router
 from vllm_source_gateway.routing import RoutingRegistry
@@ -139,6 +140,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
     app.include_router(models_router)
     app.include_router(chat_completions_router)
     app.include_router(responses_router)
+    app.include_router(messages_router)
 
     @app.get("/metrics")
     async def metrics(request: Request) -> PlainTextResponse:

@@ -321,10 +321,6 @@ Result:
 - malformed or pathological upstream SSE streams can no longer grow the gateway decode buffer without limit
 - the gateway keeps the client stream alive when possible while still protecting process memory and preserving conservative accounting semantics
 
-## Should Clarify Now
-
-## Next Hardening Batch
-
 ### gateway-origin and upstream-origin failures are distinguished
 
 Current state:
@@ -362,7 +358,25 @@ Result:
 
 - the codebase is less misleading and has fewer branches that imply unsupported behavior
 
-## Valid but Defer
+### `/v1/messages` is now a native upstream proxy path
+
+Current state:
+
+- the gateway now exposes `POST /v1/messages`
+- the gateway now proxies `POST /v1/messages` directly to upstream `/v1/messages`
+- request validation on the gateway side stays minimal and routing-focused
+- upstream `messages` responses, including non-2xx error payloads, are passed through without gateway-side Anthropic reshaping
+
+Result:
+
+- Anthropic-oriented callers now use the upstream `messages` capability directly instead of a gateway-defined translation layer
+- tool use and other provider-native `messages` semantics can now track upstream behavior much more closely
+
+## Next Hardening Batch
+
+- no immediate hardening items remain in the current reviewer-driven batch
+
+## Deferred Design Tradeoffs
 
 ### env resolution inside Pydantic validation
 
@@ -400,9 +414,11 @@ Result:
 - they should not be treated as already solved for multi-worker deployment
 - they become blocking only if the project adopts multi-worker or horizontally scaled shared-state operation
 
-## Defer
+## Next Phase and Longer-Term Backlog
 
-### config hot reload
+### Longer-Term Architecture Items
+
+#### config hot reload
 
 Why defer:
 
@@ -411,31 +427,53 @@ Why defer:
 
 Action:
 
-- restart requirement is now documented; keep restart-based config changes unless hot reload becomes a deliberate feature
+- keep restart-based config changes unless hot reload becomes a deliberate feature
 
-### `/v1/models` information exposure tuning
+#### `/v1/models` information exposure tuning
 
 Why defer:
 
 - current model list shape is acceptable for MVP
 - replica-count exposure can be revisited once auth posture is clearer
 
-### full stateful Responses API semantics
+#### full stateful Responses API semantics
 
 Why defer:
 
-- current MVP can remain scoped to `POST /v1/responses`
-- full stored-response and retrieval semantics are a larger compatibility surface
+- current MVP remains intentionally scoped to `POST /v1/responses`
+- full stored-response and retrieval semantics are a much larger compatibility surface
 
 Action:
 
-- current `POST /v1/responses` proxy-only scope is now documented; keep full stateful semantics out of the current MVP
+- keep full stateful semantics out of the current MVP unless a concrete caller depends on them
+
+#### broader Anthropic Messages compatibility
+
+Why defer:
+
+- the current `/v1/messages` path is intentionally stateless and proxy-oriented
+- broader lifecycle semantics beyond upstream `POST /v1/messages` would still expand the contract significantly
+
+Action:
+
+- keep `POST /v1/messages` aligned with upstream behavior unless a concrete caller requires broader stateful or non-proxy Anthropic semantics
+
+### Next Phase Backlog
+
+These are the most natural follow-up items after the current hardening and native-messages work:
+
+1. run a real-upstream, production-like E2E validation pass for `POST /v1/messages`
+2. validate native `/v1/messages` streaming token accounting against real upstream behavior and harden if needed
+3. add production-like tool-use validation scenarios for `/v1/messages`
+4. revisit whether `/v1/responses` or `/v1/messages` needs the next compatibility investment first
 
 ## Suggested Next Order
 
 Recommended next implementation order:
 
-- no immediate hardening items remain in the current triage batch
+1. run real-upstream `/v1/messages` validation
+2. validate native `/v1/messages` streaming token accounting against real upstream behavior
+3. decide the next compatibility expansion target based on real callers
 
 ## Assumptions
 

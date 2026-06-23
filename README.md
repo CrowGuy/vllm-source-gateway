@@ -59,6 +59,7 @@ The first version supports:
 - `GET /v1/models`
 - `POST /v1/chat/completions`
 - `POST /v1/responses`
+- `POST /v1/messages`
 
 ### Model Discovery
 
@@ -85,6 +86,35 @@ Current scope:
 
 - the gateway guarantees `POST /v1/responses` proxy compatibility for stateless request forwarding
 - the gateway does not currently guarantee full stateful Responses API semantics such as stored-response retrieval, `previous_response_id`, or `GET /v1/responses/{id}`
+
+### Anthropic Messages API
+
+The gateway also supports a native proxy path for `POST /v1/messages` so Anthropic-oriented callers can reach the same vLLM-backed model pool without a separate ingress.
+
+Current scope:
+
+- the gateway guarantees `POST /v1/messages` only
+- the gateway treats `/v1/messages` as a stateless proxy scope only
+- the gateway proxies requests to upstream `POST /v1/messages` without gateway-side Anthropic-to-OpenAI translation
+- the gateway keeps gateway-level concerns such as source resolution, routing, auth injection, failover, metrics, and conservative token accounting
+- request and response semantics for tools, thinking, multimodal blocks, and other Anthropic-native fields are determined by the upstream vLLM `messages` implementation
+- the gateway does not currently guarantee full Anthropic stateful semantics such as stored-message retrieval or broader lifecycle APIs beyond `POST /v1/messages`
+
+Current validation and behavior:
+
+- gateway-side request validation stays minimal:
+  - request body must be a JSON object
+  - `model` must be present so the gateway can route the request
+- beyond that minimal validation, request fields are passed through to upstream `/v1/messages`
+- upstream non-2xx `messages` responses are passed through raw when a response exists
+- unit and endpoint tests now cover native `/v1/messages` proxy behavior, header policy, usage accounting, and streaming pass-through
+- a production-like real-upstream validation pass for `/v1/messages`, including tool use, should be treated as the next validation milestone for this path
+
+Stateful semantics explicitly out of scope:
+
+- stored message retrieval or replay semantics
+- broader Anthropic lifecycle or state management features
+- any guarantee of full wire-level compatibility with every Anthropic SDK feature beyond upstream `POST /v1/messages`
 
 ### Streaming Behavior
 
@@ -508,7 +538,22 @@ curl -sS -N \
   }'
 ```
 
-7. metrics contract visibility
+7. Anthropic-compatible request path
+
+```bash
+curl -sS \
+  -H "content-type: application/json" \
+  -H "x-api-key: ${API_KEY}" \
+  -H "anthropic-version: 2023-06-01" \
+  -X POST "http://127.0.0.1:8080/v1/messages" \
+  --data '{
+    "model": "gemma-4-31b",
+    "max_tokens": 128,
+    "messages": [{"role": "user", "content": "Reply with exactly: hello from gateway"}]
+  }'
+```
+
+8. metrics contract visibility
 
 ```bash
 curl -sS http://127.0.0.1:8080/metrics | grep gateway_http_requests_total
@@ -563,7 +608,7 @@ Security posture for `/metrics`:
 Observability scope:
 
 - the current bounded metrics contract is optimized for source-attributed proxy traffic
-- `/v1/chat/completions` and `/v1/responses` are the primary routes expected to feed department-level request, token, and failure views
+- `/v1/chat/completions`, `/v1/responses`, and `/v1/messages` are the primary routes expected to feed department-level request, token, and failure views
 - `/v1/models`, `/livez`, `/readyz`, `/healthz`, `/metrics`, generic `404` responses, and some pre-proxy failures are not currently first-class parts of the source-attributed metrics contract
 - access logging follows the same bias toward operationally relevant proxy traffic
 
@@ -751,6 +796,7 @@ The MVP should stay intentionally small.
 - read-only `GET /v1/models`
 - support for `/v1/chat/completions`
 - support for `/v1/responses`
+- support for `POST /v1/messages` as a native upstream proxy path
 - static upstream list for multiple vLLM services
 - streaming pass-through
 - source resolution from API key
@@ -762,6 +808,7 @@ The MVP should stay intentionally small.
 ### Out of Scope
 
 - streaming-specific advanced accounting beyond what is needed for correct request completion metrics
+- full Anthropic Messages API compatibility beyond upstream `POST /v1/messages` and the current stateless proxy scope
 - dynamic service discovery
 - tenant admin UI
 - quota management
@@ -779,9 +826,10 @@ The MVP is successful when:
 1. users can query `GET /v1/models` to discover which models are currently available
 2. callers use the gateway instead of talking directly to vLLM
 3. code agents and responses-based clients can call the gateway through `/v1/responses`
-4. one department using multiple IPs still appears as one department in Prometheus metrics
-5. the observability repo can derive department-level request, token, error-rate, and latency views from the emitted metrics
-6. `department="unknown"` is visible and explainable
+4. Anthropic-oriented callers can call the gateway through the native `POST /v1/messages` proxy path
+5. one department using multiple IPs still appears as one department in Prometheus metrics
+6. the observability repo can derive department-level request, token, error-rate, and latency views from the emitted metrics
+7. `department="unknown"` is visible and explainable
 
 One successful real-upstream validation record is documented in
 [docs/e2e-validation-gemma4.md](/home/randy/Documents/crow/vllm-source-gateway/docs/e2e-validation-gemma4.md).
