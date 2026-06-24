@@ -61,6 +61,12 @@ The first version supports:
 - `POST /v1/responses`
 - `POST /v1/messages`
 
+Compatibility freeze:
+
+- the current launch cycle intentionally freezes supported LLM proxy paths at `POST /v1/chat/completions`, `POST /v1/responses`, and `POST /v1/messages`
+- new API surfaces should be treated as post-launch work and require a separate product and compatibility decision
+- launch-stability work should prioritize reliability, rollback safety, observability correctness, and operator runbooks before adding another proxy path
+
 ### Model Discovery
 
 The gateway should provide a read-only model discovery endpoint so users can check which models are currently available without relying on manual email notifications.
@@ -458,6 +464,208 @@ Operational recommendation:
 
 If the deployment environment is constrained, prefer moving a tested image to a newer host over
 rebuilding the gateway inside an older runtime stack.
+
+### Release Gate
+
+Use this gate before promoting a new image, `config.prod.yaml`, or `.env.prod` change.
+
+Required checks:
+
+1. local tests pass
+
+```bash
+pytest
+```
+
+2. production image builds or a previously tested image is available
+
+```bash
+docker compose -f docker-compose.prod.yml build
+docker images | grep vllm-source-gateway
+```
+
+3. runtime configuration and secrets are present
+
+```bash
+test -f config.prod.yaml
+test -f .env.prod
+grep -E '^(DEPT_.*_API_KEYS|UPSTREAM_.*_TOKEN)=' .env.prod | cut -d= -f1
+```
+
+4. container starts and becomes healthy
+
+```bash
+docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml ps
+docker inspect --format '{{json .State.Health}}' vllm-source-gateway
+```
+
+5. liveness, readiness, and model discovery pass
+
+```bash
+curl -fsS http://127.0.0.1:8080/livez
+curl -fsS http://127.0.0.1:8080/readyz
+curl -fsS http://127.0.0.1:8080/v1/models
+```
+
+6. frozen compatibility paths pass smoke validation
+
+```bash
+curl -fsS \
+  -H "content-type: application/json" \
+  -H "x-api-key: ${API_KEY}" \
+  -X POST "http://127.0.0.1:8080/v1/chat/completions" \
+  --data '{"model":"'"${MODEL_NAME}"'","messages":[{"role":"user","content":"Reply with exactly: ok"}]}'
+
+curl -fsS \
+  -H "content-type: application/json" \
+  -H "x-api-key: ${API_KEY}" \
+  -X POST "http://127.0.0.1:8080/v1/responses" \
+  --data '{"model":"'"${MODEL_NAME}"'","input":"Reply with exactly: ok"}'
+
+curl -fsS \
+  -H "content-type: application/json" \
+  -H "x-api-key: ${API_KEY}" \
+  -H "anthropic-version: 2023-06-01" \
+  -X POST "http://127.0.0.1:8080/v1/messages" \
+  --data '{"model":"'"${MODEL_NAME}"'","max_tokens":64,"messages":[{"role":"user","content":"Reply with exactly: ok"}]}'
+```
+
+7. metrics are visible and bounded
+
+```bash
+curl -fsS http://127.0.0.1:8080/metrics | grep gateway_http_requests_total
+curl -fsS http://127.0.0.1:8080/metrics | grep gateway_source_resolution_total
+curl -fsS http://127.0.0.1:8080/metrics | grep gateway_token_accounting_total
+```
+
+Release success criteria:
+
+- all required checks pass on the target host or staging host with the same image and config shape
+- `/readyz` confirms at least one healthy upstream for the deployed model set
+- the three frozen compatibility paths return successful responses through the gateway
+- `/metrics` exposes request, source-resolution, and token-accounting signals after traffic
+
+### Rollback Playbook
+
+Use rollback when the new image or config causes startup failure, readiness failure, widespread proxy errors,
+or caller-visible regressions on the frozen compatibility paths.
+
+Before changing production, keep these rollback inputs:
+
+- previous working image tag
+- previous `config.prod.yaml`
+- previous `.env.prod`
+- timestamp or commit for the attempted deployment
+
+Rollback image only:
+
+```bash
+docker tag vllm-source-gateway:previous vllm-source-gateway:prod
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Rollback config or env:
+
+```bash
+cp config.prod.yaml.previous config.prod.yaml
+cp .env.prod.previous .env.prod
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Rollback verification:
+
+```bash
+docker compose -f docker-compose.prod.yml ps
+curl -fsS http://127.0.0.1:8080/livez
+curl -fsS http://127.0.0.1:8080/readyz
+curl -fsS http://127.0.0.1:8080/v1/models
+curl -fsS http://127.0.0.1:8080/metrics | grep gateway_http_requests_total
+```
+
+Rollback decision guidance:
+
+- rollback immediately if the container cannot stay running
+- rollback if `/livez` fails after restart
+- rollback if `/readyz` fails for all expected upstreams and the previous config was known healthy
+- rollback if all three frozen compatibility paths fail through the gateway while direct upstream checks still pass
+- debug in place only when the issue is isolated to one upstream, one department key, or one caller request shape
+
+### Operator Runbook
+
+Use this runbook for first-pass diagnosis before changing code.
+
+Container is not running:
+
+```bash
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml logs gateway --tail=200
+docker inspect vllm-source-gateway
+```
+
+Likely causes:
+
+- missing env-backed department keys or upstream tokens
+- invalid `config.prod.yaml`
+- host/runtime compatibility issue
+
+`/livez` passes but `/readyz` fails:
+
+```bash
+curl -fsS http://127.0.0.1:8080/livez
+curl -sS http://127.0.0.1:8080/readyz
+docker compose -f docker-compose.prod.yml logs gateway --tail=200
+```
+
+Likely causes:
+
+- upstream is down
+- upstream bearer token is wrong
+- `health.probe_path` is not supported by the upstream
+- gateway host cannot route to upstream `base_url`
+
+`/v1/models` lists a model but requests fail:
+
+```bash
+curl -sS http://127.0.0.1:8080/v1/models
+curl -sS http://127.0.0.1:8080/metrics | grep gateway_http_request_failures_total
+docker compose -f docker-compose.prod.yml logs gateway --tail=200
+```
+
+Likely causes:
+
+- upstream model name differs from the public model name in config
+- selected upstream is unhealthy between probe intervals
+- upstream rejects gateway bearer auth
+- caller request shape is rejected by upstream
+
+Caller is rejected or attributed to `unknown`:
+
+```bash
+grep -E '^DEPT_.*_API_KEYS=' .env.prod | cut -d= -f1
+grep reject_unknown_api_keys config.prod.yaml
+curl -sS http://127.0.0.1:8080/metrics | grep gateway_source_resolution_total
+```
+
+Likely causes:
+
+- caller used the wrong `x-api-key`
+- department env var is missing the key
+- `security.reject_unknown_api_keys=true` is enabled
+
+Metrics exist but token counters do not increase:
+
+```bash
+curl -sS http://127.0.0.1:8080/metrics | grep gateway_token_accounting_total
+curl -sS http://127.0.0.1:8080/metrics | grep gateway_prompt_tokens_total
+curl -sS http://127.0.0.1:8080/metrics | grep gateway_generation_tokens_total
+```
+
+Likely causes:
+
+- upstream did not return reliable usage
+- request failed or returned non-2xx
+- stream completed without usage events
 
 ### Basic Smoke Checks
 

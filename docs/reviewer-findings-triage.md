@@ -399,6 +399,32 @@ Result:
 - the current `/v1/responses` path has crossed the initial real-environment validation bar
 - the current compatibility surface is intentionally frozen at `chat/completions`, `responses`, and `messages` while the project finishes launch-stability and operational hardening work
 
+### compatibility contract is frozen for the current launch cycle
+
+Current state:
+
+- README now defines `POST /v1/chat/completions`, `POST /v1/responses`, and `POST /v1/messages` as the only supported LLM proxy paths for the current launch cycle
+- new API surfaces are explicitly treated as post-launch work that requires a separate product and compatibility decision
+- launch-stability work is prioritized ahead of any additional proxy path
+
+Result:
+
+- the project no longer leaves compatibility expansion as an open next-step ambiguity
+- follow-up work can focus on release gate, rollback safety, observability correctness, runbooks, and capacity baseline
+
+### release gate, rollback, and operator runbook documentation is now present
+
+Current state:
+
+- README now defines a release gate for image, config, and `.env.prod` changes
+- rollback steps are documented for image rollback and config/env rollback
+- operator runbook checks now cover container startup, liveness/readiness, model request failures, source-resolution issues, and token-accounting gaps
+
+Result:
+
+- production handoff no longer depends only on ad hoc deployment memory
+- maintainers have a documented first-response path before expanding the API surface further
+
 ## Next Hardening Batch
 
 - no immediate hardening items remain in the current reviewer-driven batch
@@ -489,19 +515,17 @@ Action:
 
 These are the most natural follow-up items after the current hardening and native proxy work:
 
-1. define a release gate and launch checklist for the frozen compatibility surface
-2. document rollback steps for image, config, and `.env.prod` changes
-3. add a support matrix for validated caller paths, tool use, and production-tested upstream behavior
-4. document an operator runbook for common readiness, routing, auth, and metrics failures
-5. establish a lightweight single-process capacity baseline for expected streaming and agent concurrency
+1. add a support matrix for validated caller paths, tool use, and production-tested upstream behavior
+2. establish a lightweight single-process capacity baseline for expected streaming and agent concurrency
+3. keep release-gate and runbook checks current as deployment shape changes
 
 ## Suggested Next Order
 
 Recommended next implementation order:
 
-1. freeze the compatibility contract at `chat/completions`, `responses`, and `messages`
-2. add release gate, rollback, and runbook documentation before expanding any API surface
-3. keep production validation checklists current as caller mix, model mix, or upstream behavior changes
+1. keep production validation checklists current as caller mix, model mix, or upstream behavior changes
+2. add a support matrix for validated caller paths, tool use, and production-tested upstream behavior
+3. establish a lightweight single-process capacity baseline for expected streaming and agent concurrency
 4. only revisit new compatibility work after the launch-stability backlog is materially closed
 
 ## Assumptions
