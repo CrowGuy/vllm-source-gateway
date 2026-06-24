@@ -67,6 +67,32 @@ Compatibility freeze:
 - new API surfaces should be treated as post-launch work and require a separate product and compatibility decision
 - launch-stability work should prioritize reliability, rollback safety, observability correctness, and operator runbooks before adding another proxy path
 
+### Support Matrix
+
+This matrix summarizes the current supported caller paths and the validation confidence behind them.
+
+| Caller path | Proxy mode | Non-streaming | Streaming | Tool use | Token accounting | Production validation |
+| --- | --- | --- | --- | --- | --- | --- |
+| `POST /v1/chat/completions` | Native upstream proxy | Supported | Supported | Pass-through by upstream behavior | Conservative usage extraction when upstream returns reliable usage | Real-upstream E2E validation completed for non-streaming and streaming |
+| `POST /v1/responses` | Native stateless upstream proxy | Supported | Supported | Validated for active real-caller scenarios | Conservative usage extraction with `recorded` or `missing_usage` status | Production validation completed for non-streaming, streaming, and tool-use parity |
+| `POST /v1/messages` | Native upstream `messages` proxy | Supported | Supported | Validated for production-like tool-use edge cases | Streaming token accounting validated against real upstream behavior | Production validation completed for native proxy behavior, streaming accounting, and tool use |
+
+Support boundaries:
+
+- `GET /v1/models` is supported for read-only model discovery, not inference.
+- `POST /v1/responses` is scoped to stateless proxy behavior and does not guarantee stored-response lifecycle semantics.
+- `POST /v1/messages` follows upstream vLLM `messages` behavior and does not guarantee broader Anthropic lifecycle APIs.
+- Tool-use semantics are delegated to the upstream model and vLLM implementation; the gateway validates routing needs and preserves pass-through behavior.
+- Token counters are emitted only when usage is reliable; missing usage is reported through token-accounting status instead of being estimated.
+
+Rerun the relevant validation checklist after:
+
+- upgrading vLLM
+- changing model deployments
+- adding or removing upstreams
+- changing upstream auth or department API keys
+- changing the main caller population or tool-use request shapes
+
 ### Model Discovery
 
 The gateway should provide a read-only model discovery endpoint so users can check which models are currently available without relying on manual email notifications.

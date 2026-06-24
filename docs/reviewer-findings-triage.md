@@ -425,6 +425,19 @@ Result:
 - production handoff no longer depends only on ad hoc deployment memory
 - maintainers have a documented first-response path before expanding the API surface further
 
+### support matrix is now documented
+
+Current state:
+
+- README now includes a support matrix for `chat/completions`, `responses`, and `messages`
+- the matrix records proxy mode, non-streaming support, streaming support, tool-use posture, token-accounting behavior, and production validation status
+- support boundaries for model discovery, stateless `responses`, native `messages`, tool-use delegation, and conservative token accounting are documented near the matrix
+
+Result:
+
+- current caller-path support is visible in one place instead of being inferred from scattered validation notes
+- future vLLM, model, upstream, auth, or caller-shape changes now have a clear validation reference point
+
 ## Next Hardening Batch
 
 - no immediate hardening items remain in the current reviewer-driven batch
@@ -515,18 +528,16 @@ Action:
 
 These are the most natural follow-up items after the current hardening and native proxy work:
 
-1. add a support matrix for validated caller paths, tool use, and production-tested upstream behavior
-2. establish a lightweight single-process capacity baseline for expected streaming and agent concurrency
-3. keep release-gate and runbook checks current as deployment shape changes
+1. establish a lightweight single-process capacity baseline for expected streaming and agent concurrency
+2. keep support matrix, release-gate, and runbook checks current as deployment shape changes
 
 ## Suggested Next Order
 
 Recommended next implementation order:
 
-1. keep production validation checklists current as caller mix, model mix, or upstream behavior changes
-2. add a support matrix for validated caller paths, tool use, and production-tested upstream behavior
-3. establish a lightweight single-process capacity baseline for expected streaming and agent concurrency
-4. only revisit new compatibility work after the launch-stability backlog is materially closed
+1. establish a lightweight single-process capacity baseline for expected streaming and agent concurrency
+2. keep production validation checklists, support matrix, release-gate, and runbook checks current as deployment shape changes
+3. only revisit new compatibility work after the launch-stability backlog is materially closed
 
 ## Assumptions
 
