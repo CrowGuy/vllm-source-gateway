@@ -1391,6 +1391,108 @@ Representative starting point:
 
 Final sizing depends more on concurrency, streaming duration, and network throughput than on model compute.
 
+### Single-Process Capacity Baseline
+
+Use the capacity baseline script to characterize the current single-process deployment under
+expected streaming and agent-style concurrency. This is a lightweight streaming
+production-confidence check, not a maximum throughput benchmark and not a separate non-streaming
+capacity profile.
+
+Run from a host that can reach the gateway:
+
+```bash
+export GATEWAY_BASE_URL=http://127.0.0.1:8080
+export API_KEY=replace-me
+export MODEL_NAME=replace-me
+
+python tools/capacity_baseline.py \
+  --paths chat,responses,messages \
+  --concurrency-levels 1,5,10 \
+  --requests-per-level 10 \
+  --output-dir /tmp/vllm-source-gateway-capacity
+```
+
+Useful options:
+
+- `--paths chat,responses,messages` selects the frozen proxy paths to test
+- `--concurrency-levels 1,5,10,20` sets the concurrent streaming levels
+- `--requests-per-level 20` controls sample size per path and concurrency level
+- `--mixed-models model-a:10,model-b:5` runs multiple models concurrently in one baseline
+- `--prompt-file /path/to/prompt.txt` reads a UTF-8 prompt file for large-context runs
+- `--fail-on-error` returns a non-zero exit code when any request fails
+
+For mixed-model baselines, use `--mixed-models` to exercise production-like traffic across
+multiple model routes at the same time:
+
+```bash
+python tools/capacity_baseline.py \
+  --paths chat,responses,messages \
+  --mixed-models model-a:10,model-b:5 \
+  --requests-per-level 30 \
+  --timeout-seconds 300 \
+  --max-tokens 1024 \
+  --output-dir /tmp/vllm-source-gateway-capacity-mixed
+```
+
+Mixed-model mode intentionally overrides `--model` and `--concurrency-levels`. The summary report
+groups results by model and path so maintainers can check whether one busy model affects another.
+For accepted baseline interpretation and operational checks, use the production baseline document
+linked below.
+
+For large-context baselines, prefer `--prompt-file` instead of shell command substitution:
+
+```bash
+python tools/capacity_baseline.py \
+  --paths chat,responses,messages \
+  --concurrency-levels 1,3,5 \
+  --requests-per-level 10 \
+  --timeout-seconds 900 \
+  --max-tokens 1024 \
+  --prompt-file /tmp/large-context-prompt.txt \
+  --output-dir /tmp/vllm-source-gateway-capacity-large-context
+```
+
+When recording large-context results, capture both prompt characters and observed prompt tokens if
+the upstream returns reliable usage. Character count is useful for reproducing the input shape, but
+prompt tokens are the better comparison unit across models, tokenizers, and languages.
+
+Artifacts:
+
+- `summary.md`
+- `summary.json`
+- `results.json`
+- `metrics_before.prom`
+- `metrics_after.prom`
+
+Baseline success criteria:
+
+- no unexpected gateway-origin failures
+- no container restart during the run
+- `/livez` and `/readyz` remain healthy after the run
+- memory does not show obvious continuous growth
+- `summary.md` records an acceptable success rate and latency range for the intended deployment
+
+For accepted production baselines, also record run identity and operational evidence:
+
+- gateway image tag or git revision
+- vLLM version
+- production host shape
+- gateway config revision or checksum
+- run date
+- `/livez` and `/readyz` snapshots after the run
+- container restart counter and basic CPU/memory observation
+- token-accounting status and observed prompt tokens for large-context profiles when available
+
+Accepted production capacity baseline currently exists for:
+
+- single-model normal, long-output, and large-context profiles
+- mixed-model normal, long-output, and large-context profiles
+- frozen API paths: `chat/completions`, `responses`, and `messages`
+
+See
+[docs/capacity-baseline-production-model-mix.md](/home/randy/Documents/crow/vllm-source-gateway/docs/capacity-baseline-production-model-mix.md)
+for the current production baseline summary.
+
 ## MVP Scope
 
 The MVP should stay intentionally small.

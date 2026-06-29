@@ -438,6 +438,23 @@ Result:
 - current caller-path support is visible in one place instead of being inferred from scattered validation notes
 - future vLLM, model, upstream, auth, or caller-shape changes now have a clear validation reference point
 
+### lightweight capacity baseline tooling is now present
+
+Current state:
+
+- `tools/capacity_baseline.py` provides a lightweight async streaming capacity check for the frozen proxy paths
+- the tool can exercise `chat`, `responses`, and `messages` with configurable concurrency levels and request counts
+- README documents how to run the tool and where to find generated artifacts
+- initial production single-model capacity baselines are recorded for normal, long-output, and large-context profiles
+- initial production mixed-model capacity baselines are recorded for normal, long-output, and large-context profiles
+- the baseline documentation now calls out streaming-only scope, run identity fields, operational evidence, and large-context prompt-token recording expectations
+
+Result:
+
+- maintainers now have a repeatable way to characterize the current single-process deployment
+- the current production baseline is recorded in `docs/capacity-baseline-production-model-mix.md`
+- future model, upstream, host, or topology changes should re-run and update the baseline
+
 ## Next Hardening Batch
 
 - no immediate hardening items remain in the current reviewer-driven batch
@@ -528,15 +545,16 @@ Action:
 
 These are the most natural follow-up items after the current hardening and native proxy work:
 
-1. establish a lightweight single-process capacity baseline for expected streaming and agent concurrency
-2. keep support matrix, release-gate, and runbook checks current as deployment shape changes
+1. validate same-model multi-upstream round-robin behavior when multi-replica model pools are deployed
+2. validate same-model connect-stage failover behavior against a real multi-upstream pool
+3. keep the production capacity baseline current as model mix, upstream shape, or host shape changes
 
 ## Suggested Next Order
 
 Recommended next implementation order:
 
-1. establish a lightweight single-process capacity baseline for expected streaming and agent concurrency
-2. keep production validation checklists, support matrix, release-gate, and runbook checks current as deployment shape changes
+1. validate same-model multi-upstream round-robin behavior when multi-replica model pools are deployed
+2. validate same-model connect-stage failover behavior against a real multi-upstream pool
 3. only revisit new compatibility work after the launch-stability backlog is materially closed
 
 ## Assumptions
