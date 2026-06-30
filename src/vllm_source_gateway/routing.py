@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass, replace
 from threading import Lock
 
 from vllm_source_gateway.config import AppConfig
-from vllm_source_gateway.models import ModelAvailability, SelectedUpstream, UpstreamHealthSnapshot, UpstreamTarget
+from vllm_source_gateway.models import (
+    ModelAvailability,
+    SelectedUpstream,
+    UpstreamHealthSnapshot,
+    UpstreamTarget,
+)
 
 
 class RoutingError(RuntimeError):
@@ -19,16 +25,29 @@ class NoHealthyUpstreamError(RoutingError):
     """Raised when a requested model has no healthy upstreams."""
 
 
+@dataclass(frozen=True, slots=True)
+class UpstreamHealthState:
+    healthy: bool
+    last_probe_at: str | None = None
+    last_success_at: str | None = None
+    last_status_code: int | None = None
+    last_error: str | None = None
+
+
 class RoutingRegistry:
     def __init__(self, upstreams: list[UpstreamTarget]) -> None:
         self._upstreams_by_name = {upstream.name: upstream for upstream in upstreams}
-        self._model_to_upstreams: dict[str, tuple[UpstreamTarget, ...]] = self._build_model_index(upstreams)
-        self._health_by_name = {upstream.name: True for upstream in upstreams}
+        self._model_to_upstreams: dict[str, tuple[UpstreamTarget, ...]] = (
+            self._build_model_index(upstreams)
+        )
+        self._health_by_name = {
+            upstream.name: UpstreamHealthState(healthy=True) for upstream in upstreams
+        }
         self._round_robin_index: dict[str, int] = defaultdict(int)
         self._lock = Lock()
 
     @classmethod
-    def from_config(cls, config: AppConfig) -> "RoutingRegistry":
+    def from_config(cls, config: AppConfig) -> RoutingRegistry:
         upstreams = [
             UpstreamTarget(
                 name=upstream.name,
@@ -41,7 +60,9 @@ class RoutingRegistry:
         return cls(upstreams=upstreams)
 
     @staticmethod
-    def _build_model_index(upstreams: list[UpstreamTarget]) -> dict[str, tuple[UpstreamTarget, ...]]:
+    def _build_model_index(
+        upstreams: list[UpstreamTarget],
+    ) -> dict[str, tuple[UpstreamTarget, ...]]:
         model_index: dict[str, list[UpstreamTarget]] = defaultdict(list)
         for upstream in upstreams:
             for model_name in upstream.models:
@@ -71,7 +92,7 @@ class RoutingRegistry:
                     model_name=model_name,
                     total_upstream_count=len(upstreams),
                     healthy_upstream_count=sum(
-                        1 for upstream in upstreams if self._health_by_name.get(upstream.name, False)
+                        1 for upstream in upstreams if self._health_by_name[upstream.name].healthy
                     ),
                 )
                 for model_name, upstreams in sorted(self._model_to_upstreams.items())
@@ -80,15 +101,43 @@ class RoutingRegistry:
     def health_snapshots(self) -> list[UpstreamHealthSnapshot]:
         with self._lock:
             return [
-                UpstreamHealthSnapshot(upstream_name=name, healthy=healthy)
-                for name, healthy in sorted(self._health_by_name.items())
+                UpstreamHealthSnapshot(
+                    upstream_name=name,
+                    healthy=state.healthy,
+                    last_probe_at=state.last_probe_at,
+                    last_success_at=state.last_success_at,
+                    last_status_code=state.last_status_code,
+                    last_error=state.last_error,
+                )
+                for name, state in sorted(self._health_by_name.items())
             ]
 
-    def set_upstream_health(self, upstream_name: str, healthy: bool) -> None:
+    def set_upstream_health(
+        self,
+        upstream_name: str,
+        healthy: bool,
+        *,
+        last_probe_at: str | None = None,
+        last_success_at: str | None = None,
+        last_status_code: int | None = None,
+        last_error: str | None = None,
+    ) -> None:
         with self._lock:
             if upstream_name not in self._upstreams_by_name:
                 raise RoutingError(f"unknown upstream '{upstream_name}'")
-            self._health_by_name[upstream_name] = healthy
+            previous = self._health_by_name[upstream_name]
+            self._health_by_name[upstream_name] = replace(
+                previous,
+                healthy=healthy,
+                last_probe_at=(
+                    last_probe_at if last_probe_at is not None else previous.last_probe_at
+                ),
+                last_success_at=(
+                    last_success_at if last_success_at is not None else previous.last_success_at
+                ),
+                last_status_code=last_status_code,
+                last_error=last_error,
+            )
 
     def select_upstream(
         self,
@@ -112,14 +161,16 @@ class RoutingRegistry:
                 candidate = upstreams[candidate_index]
                 if candidate.name in excluded_names:
                     continue
-                if not self._health_by_name.get(candidate.name, False):
+                if not self._health_by_name[candidate.name].healthy:
                     continue
                 selected = candidate
                 selected_index = candidate_index
                 break
 
             if selected is None or selected_index is None:
-                raise NoHealthyUpstreamError(f"no healthy upstream available for model '{model_name}'")
+                raise NoHealthyUpstreamError(
+                    f"no healthy upstream available for model '{model_name}'"
+                )
 
             self._round_robin_index[model_name] = (selected_index + 1) % pool_size
 

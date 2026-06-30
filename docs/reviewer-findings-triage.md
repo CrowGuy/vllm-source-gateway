@@ -21,6 +21,11 @@ This triage is based on:
 
 The current gateway contract is intentionally locked to a **single-process deployment baseline**.
 
+Repository status:
+
+- launch-ready for the current single-process, current-model-mix production baseline
+- multi-replica same-model routing validation is deferred until the required hardware/topology is available
+
 Current baseline:
 
 - one uvicorn worker per container
@@ -244,6 +249,21 @@ Result:
 
 - health state can converge faster as upstream count grows
 - the current single-process baseline no longer serializes one full probe round across all upstreams
+
+### upstream health diagnostics and monitor resilience are now present
+
+Current state:
+
+- the health monitor background loop catches unexpected refresh errors and continues probing
+- upstream health state records `last_probe_at`, `last_success_at`, `last_status_code`, and `last_error`
+- `/readyz` includes per-upstream diagnostics while keeping the existing readiness counts
+- an upstream that returns from unhealthy to healthy can be marked healthy again without restarting the gateway
+
+Result:
+
+- operators can distinguish process liveness from upstream readiness and see why an upstream is unhealthy
+- transient health-monitor errors are less likely to leave readiness stuck until a gateway restart
+- scheduled upstream shutdown and restart cycles are easier to diagnose without changing the `/livez` contract
 
 ### `/metrics` access boundary is now clarified
 
@@ -541,21 +561,29 @@ Action:
 
 - keep `POST /v1/messages` aligned with upstream behavior unless a concrete caller requires broader stateful or non-proxy Anthropic semantics
 
+### Ongoing Maintenance
+
+These are not unfinished launch blockers. They are continuing maintenance responsibilities after
+the current production baseline has been established.
+
+- keep the production capacity baseline current when the model mix, upstream shape, host shape,
+  vLLM version, gateway config, or caller traffic profile changes
+
 ### Next Phase Backlog
 
-These are the most natural follow-up items after the current hardening and native proxy work:
+These are deferred routing-validation items, not current launch blockers. They should be picked up
+when production has a real multi-replica same-model topology available:
 
 1. validate same-model multi-upstream round-robin behavior when multi-replica model pools are deployed
 2. validate same-model connect-stage failover behavior against a real multi-upstream pool
-3. keep the production capacity baseline current as model mix, upstream shape, or host shape changes
 
 ## Suggested Next Order
 
-Recommended next implementation order:
+Recommended next order after the required multi-replica hardware/topology is available:
 
 1. validate same-model multi-upstream round-robin behavior when multi-replica model pools are deployed
 2. validate same-model connect-stage failover behavior against a real multi-upstream pool
-3. only revisit new compatibility work after the launch-stability backlog is materially closed
+3. keep compatibility expansion frozen unless a separate product decision reopens it
 
 ## Assumptions
 

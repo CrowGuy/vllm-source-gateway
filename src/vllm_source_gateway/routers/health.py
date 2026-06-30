@@ -7,7 +7,6 @@ from vllm_source_gateway.config import AppConfig
 from vllm_source_gateway.dependencies import get_app_config, get_routing_registry
 from vllm_source_gateway.routing import RoutingRegistry
 
-
 router = APIRouter(tags=["health"])
 
 
@@ -20,7 +19,7 @@ def _build_liveness_payload(config: AppConfig) -> dict[str, int | str]:
     }
 
 
-def _build_readiness_payload(routing_registry: RoutingRegistry) -> tuple[int, dict[str, int | str]]:
+def _build_readiness_payload(routing_registry: RoutingRegistry) -> tuple[int, dict[str, object]]:
     snapshots = routing_registry.health_snapshots()
     total_upstream_count = len(snapshots)
     healthy_upstream_count = sum(1 for snapshot in snapshots if snapshot.healthy)
@@ -32,6 +31,17 @@ def _build_readiness_payload(routing_registry: RoutingRegistry) -> tuple[int, di
             "status": "ok" if ready else "not_ready",
             "healthy_upstream_count": healthy_upstream_count,
             "total_upstream_count": total_upstream_count,
+            "upstreams": [
+                {
+                    "name": snapshot.upstream_name,
+                    "healthy": snapshot.healthy,
+                    "last_probe_at": snapshot.last_probe_at,
+                    "last_success_at": snapshot.last_success_at,
+                    "last_status_code": snapshot.last_status_code,
+                    "last_error": snapshot.last_error,
+                }
+                for snapshot in snapshots
+            ],
         },
     )
 

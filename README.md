@@ -5,6 +5,11 @@ Thin gateway in front of vLLM for source resolution, department-level attributio
 
 This repository provides a thin access layer in front of one or more vLLM services.
 
+Current launch status:
+
+> Launch-ready for the current single-process, current-model-mix production baseline.
+> Multi-replica same-model routing validation is deferred until the required hardware/topology is available.
+
 Its job is not to replace vLLM. Its job is to handle entry-layer concerns that do not belong inside vLLM itself:
 
 - request ingress
@@ -161,7 +166,11 @@ Stateful semantics explicitly out of scope:
 
 ### Streaming Behavior
 
-The gateway must support streaming pass-through for chat completions.
+The gateway supports streaming pass-through for the frozen proxy paths:
+
+- `POST /v1/chat/completions`
+- `POST /v1/responses`
+- `POST /v1/messages`
 
 For MVP, this means:
 
@@ -568,7 +577,8 @@ curl -fsS http://127.0.0.1:8080/metrics | grep gateway_token_accounting_total
 Release success criteria:
 
 - all required checks pass on the target host or staging host with the same image and config shape
-- `/readyz` confirms at least one healthy upstream for the deployed model set
+- `/readyz` confirms at least one configured upstream is healthy
+- `/v1/models` confirms per-model availability for the models expected to serve traffic
 - the three frozen compatibility paths return successful responses through the gateway
 - `/metrics` exposes request, source-resolution, and token-accounting signals after traffic
 
@@ -649,6 +659,23 @@ Likely causes:
 - upstream bearer token is wrong
 - `health.probe_path` is not supported by the upstream
 - gateway host cannot route to upstream `base_url`
+
+Upstream is back online but `/readyz` still fails:
+
+```bash
+curl -fsS http://127.0.0.1:8080/livez
+curl -sS http://127.0.0.1:8080/readyz
+curl -i http://UPSTREAM_HOST:UPSTREAM_PORT/v1/models
+curl -i -H "Authorization: Bearer ${UPSTREAM_TOKEN}" http://UPSTREAM_HOST:UPSTREAM_PORT/v1/models
+docker compose -f docker-compose.prod.yml logs gateway --tail=300
+```
+
+How to interpret:
+
+- `/livez=200` and `/readyz=503` means the gateway process is alive but no upstream is currently marked healthy
+- `/readyz` includes per-upstream diagnostics such as `last_probe_at`, `last_success_at`, `last_status_code`, and `last_error`
+- if direct upstream curl succeeds but `/readyz` remains unhealthy after at least one `health.check_interval_seconds`, compare the gateway `health.probe_path`, upstream bearer token, and configured `base_url`
+- if `last_probe_at` stops changing, the health monitor may be stuck or stopped and the gateway should be restarted while logs are preserved for debugging
 
 `/v1/models` lists a model but requests fail:
 

@@ -5,6 +5,10 @@
 This document records the initial production capacity baseline for the current production model
 mix served through `vllm-source-gateway`.
 
+Current status: the gateway is launch-ready for the current single-process,
+current-model-mix production baseline. Multi-replica same-model routing validation is deferred until
+the required hardware/topology is available.
+
 It includes:
 
 - single-model baseline profiles for `gpt-oss-120b-local`

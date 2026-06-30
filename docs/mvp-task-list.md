@@ -1,5 +1,14 @@
 # MVP Task List
 
+> Status: Historical implementation planning document.
+>
+> This file records the original MVP build sequence and should not be used as the
+> current launch checklist. For the current public contract and operational source of truth, use:
+>
+> - [README.md](/home/randy/Documents/crow/vllm-source-gateway/README.md)
+> - [docs/reviewer-findings-triage.md](/home/randy/Documents/crow/vllm-source-gateway/docs/reviewer-findings-triage.md)
+> - [docs/capacity-baseline-production-model-mix.md](/home/randy/Documents/crow/vllm-source-gateway/docs/capacity-baseline-production-model-mix.md)
+
 ## Purpose
 
 This document records the original implementation-oriented MVP task list for

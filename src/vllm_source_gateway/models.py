@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-
 ModelStatus = Literal["online", "unavailable"]
 
 
@@ -41,3 +40,7 @@ class ModelAvailability:
 class UpstreamHealthSnapshot:
     upstream_name: str
     healthy: bool
+    last_probe_at: str | None = None
+    last_success_at: str | None = None
+    last_status_code: int | None = None
+    last_error: str | None = None

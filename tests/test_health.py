@@ -33,6 +33,24 @@ def test_readyz_returns_ok_when_at_least_one_upstream_is_healthy(app_client) -> 
         "status": "ok",
         "healthy_upstream_count": 2,
         "total_upstream_count": 2,
+        "upstreams": [
+            {
+                "name": "gpu-a",
+                "healthy": True,
+                "last_probe_at": None,
+                "last_success_at": None,
+                "last_status_code": None,
+                "last_error": None,
+            },
+            {
+                "name": "gpu-b",
+                "healthy": True,
+                "last_probe_at": None,
+                "last_success_at": None,
+                "last_status_code": None,
+                "last_error": None,
+            },
+        ],
     }
 
 
@@ -47,6 +65,24 @@ def test_readyz_returns_503_when_no_upstreams_are_healthy(app_client) -> None:
         "status": "not_ready",
         "healthy_upstream_count": 0,
         "total_upstream_count": 2,
+        "upstreams": [
+            {
+                "name": "gpu-a",
+                "healthy": False,
+                "last_probe_at": None,
+                "last_success_at": None,
+                "last_status_code": None,
+                "last_error": None,
+            },
+            {
+                "name": "gpu-b",
+                "healthy": False,
+                "last_probe_at": None,
+                "last_success_at": None,
+                "last_status_code": None,
+                "last_error": None,
+            },
+        ],
     }
 
 
