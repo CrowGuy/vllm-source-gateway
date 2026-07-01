@@ -394,7 +394,7 @@ Runtime secret rules:
 - `.env.prod` stores the real values
 - `.env.prod` must not be committed
 - `.env.prod` should be maintained by the deployment owner on the target host
-- changing `config.prod.yaml` or `.env.prod` still requires a container restart
+- changing `config.prod.yaml` or `.env.prod` requires recreating the container, not only restarting it
 - `/metrics` should be treated as an internal observability surface, not a public endpoint
 
 ### Production Setup
@@ -422,6 +422,15 @@ Bring the gateway up with Docker Compose:
 ```bash
 docker compose -f docker-compose.prod.yml up -d --build
 ```
+
+When `.env.prod` changes, recreate the container so Compose injects the new environment values:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --force-recreate
+```
+
+A plain container restart is not enough for `.env.prod` changes. Docker reads `env_file` values when
+the container is created; existing containers keep their original environment.
 
 Stop it:
 
@@ -530,7 +539,7 @@ grep -E '^(DEPT_.*_API_KEYS|UPSTREAM_.*_TOKEN)=' .env.prod | cut -d= -f1
 4. container starts and becomes healthy
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d --force-recreate
 docker compose -f docker-compose.prod.yml ps
 docker inspect --format '{{json .State.Health}}' vllm-source-gateway
 ```
@@ -606,7 +615,7 @@ Rollback config or env:
 ```bash
 cp config.prod.yaml.previous config.prod.yaml
 cp .env.prod.previous .env.prod
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d --force-recreate
 ```
 
 Rollback verification:
