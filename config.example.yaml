@@ -40,6 +40,43 @@ upstreams:
     models:
       - "qwen3-32b"
 
+model_catalog:
+  gpt-oss-120b:
+    display_name: "GPT OSS 120B"
+    hosted_on: "DGX-A100 production pool"
+    use_cases:
+      - "coding"
+      - "general chat"
+      - "long context"
+    api_paths:
+      - "chat"
+      - "responses"
+      - "messages"
+    context_window: "128k tokens"
+    recommended_for:
+      - "code agents"
+      - "long-form reasoning"
+    known_limits:
+      - "not intended for embedding workloads"
+    example_prompt: "Reply with exactly: hello from gateway"
+
+  qwen3-32b:
+    display_name: "Qwen3 32B"
+    hosted_on: "Lab GPU Server"
+    use_cases:
+      - "general chat"
+      - "coding"
+    api_paths:
+      - "chat"
+      - "responses"
+      - "messages"
+    context_window: "32k tokens"
+    recommended_for:
+      - "interactive assistant use"
+    known_limits:
+      - "large-context behavior should be validated before production use"
+    example_prompt: "Summarize this service in one sentence."
+
 departments:
   finance:
     api_keys_from_env: "DEPT_FINANCE_API_KEYS"

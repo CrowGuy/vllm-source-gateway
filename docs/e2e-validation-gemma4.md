@@ -123,6 +123,14 @@ Additional real-upstream validation completed after this recorded run:
 - native `/v1/messages` streaming token accounting has been validated against real upstream behavior
 - production-like tool-use edge-case validation has been completed for `/v1/messages`
 - `/v1/responses` tool-use parity has also been validated for the active real-caller scenarios using that path
+- human-readable `GET /models` model catalog has been deployed and validated in production
+
+Additional `GET /models` production validation checklist:
+
+- returns `text/html`
+- displays configured `model_catalog` metadata for documented models
+- reflects model availability from routing health state
+- does not expose upstream IPs, upstream URLs, bearer tokens, or other topology-sensitive details
 
 ## Result Interpretation
 

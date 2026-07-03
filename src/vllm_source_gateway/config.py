@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -53,6 +54,59 @@ class SecurityConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reject_unknown_api_keys: bool = False
+
+
+class ModelCatalogEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str | None = None
+    hosted_on: str | None = None
+    use_cases: list[str] = Field(default_factory=list)
+    api_paths: list[str] = Field(default_factory=list)
+    context_window: str | None = None
+    recommended_for: list[str] = Field(default_factory=list)
+    known_limits: list[str] = Field(default_factory=list)
+    example_prompt: str | None = None
+
+    @staticmethod
+    def _normalize_optional_string(value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @staticmethod
+    def _normalize_string_list(values: list[str]) -> list[str]:
+        return [value.strip() for value in values if value.strip()]
+
+    @staticmethod
+    def _validate_hosted_on(value: str | None) -> None:
+        if value is None:
+            return
+        if "://" in value or re.search(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", value):
+            raise ValueError(
+                "model_catalog hosted_on must be an abstract location description, "
+                "not an upstream URL or IP address"
+            )
+
+    @model_validator(mode="after")
+    def normalize_fields(self) -> "ModelCatalogEntry":
+        self.display_name = self._normalize_optional_string(self.display_name)
+        self.hosted_on = self._normalize_optional_string(self.hosted_on)
+        self._validate_hosted_on(self.hosted_on)
+        self.context_window = self._normalize_optional_string(self.context_window)
+        self.example_prompt = self._normalize_optional_string(self.example_prompt)
+        self.use_cases = self._normalize_string_list(self.use_cases)
+        self.api_paths = self._normalize_string_list(self.api_paths)
+        self.recommended_for = self._normalize_string_list(self.recommended_for)
+        self.known_limits = self._normalize_string_list(self.known_limits)
+        unsupported_api_paths = sorted(set(self.api_paths) - {"chat", "responses", "messages"})
+        if unsupported_api_paths:
+            raise ValueError(
+                "model_catalog api_paths may only include supported gateway paths: "
+                f"chat, responses, messages; got {unsupported_api_paths}"
+            )
+        return self
 
 
 class UpstreamConfig(BaseModel):
@@ -172,6 +226,7 @@ class AppConfig(BaseModel):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     upstreams: list[UpstreamConfig] = Field(min_length=1)
     departments: dict[str, DepartmentConfig] = Field(min_length=1)
+    model_catalog: dict[str, ModelCatalogEntry] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_unique_constraints(self) -> "AppConfig":

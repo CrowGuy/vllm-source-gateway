@@ -61,6 +61,81 @@ def test_load_config_resolves_upstream_authorization_from_env(
     assert config.upstreams[0].authorization_token == "prod-token-a"
 
 
+def test_load_config_accepts_model_catalog(sample_config_copy, write_config) -> None:
+    sample_config_copy["model_catalog"] = {
+        "model-a": {
+            "display_name": "Model A",
+            "hosted_on": "DGX-A100",
+            "use_cases": [" coding ", "general chat"],
+            "api_paths": ["chat", "responses", "messages"],
+            "context_window": " 32k tokens ",
+            "recommended_for": ["code agents"],
+            "known_limits": ["not for embeddings"],
+            "example_prompt": " Say hello. ",
+        }
+    }
+    config_path = write_config(sample_config_copy, filename="model-catalog.yaml")
+
+    config = load_config(config_path)
+
+    catalog_entry = config.model_catalog["model-a"]
+    assert catalog_entry.display_name == "Model A"
+    assert catalog_entry.hosted_on == "DGX-A100"
+    assert catalog_entry.use_cases == ["coding", "general chat"]
+    assert catalog_entry.api_paths == ["chat", "responses", "messages"]
+    assert catalog_entry.context_window == "32k tokens"
+    assert catalog_entry.recommended_for == ["code agents"]
+    assert catalog_entry.known_limits == ["not for embeddings"]
+    assert catalog_entry.example_prompt == "Say hello."
+
+
+def test_load_config_rejects_unknown_model_catalog_fields(sample_config_copy, write_config) -> None:
+    sample_config_copy["model_catalog"] = {
+        "model-a": {
+            "display_name": "Model A",
+            "unexpected": "field",
+        }
+    }
+    config_path = write_config(sample_config_copy, filename="unknown-model-catalog-field.yaml")
+
+    with pytest.raises(ConfigError, match="Extra inputs are not permitted"):
+        load_config(config_path)
+
+
+def test_load_config_rejects_unsupported_model_catalog_api_paths(
+    sample_config_copy,
+    write_config,
+) -> None:
+    sample_config_copy["model_catalog"] = {
+        "model-a": {
+            "display_name": "Model A",
+            "api_paths": ["chat", "embeddings"],
+        }
+    }
+    config_path = write_config(sample_config_copy, filename="unsupported-catalog-api-path.yaml")
+
+    with pytest.raises(ConfigError, match="api_paths may only include supported gateway paths"):
+        load_config(config_path)
+
+
+@pytest.mark.parametrize("hosted_on", ["http://10.0.0.1:8000", "10.0.0.1"])
+def test_load_config_rejects_model_catalog_hosted_on_urls_or_ips(
+    sample_config_copy,
+    write_config,
+    hosted_on,
+) -> None:
+    sample_config_copy["model_catalog"] = {
+        "model-a": {
+            "display_name": "Model A",
+            "hosted_on": hosted_on,
+        }
+    }
+    config_path = write_config(sample_config_copy, filename="unsafe-catalog-hosted-on.yaml")
+
+    with pytest.raises(ConfigError, match="hosted_on must be an abstract location description"):
+        load_config(config_path)
+
+
 def test_load_config_rejects_missing_upstream_authorization_env(
     monkeypatch,
     sample_config_copy,

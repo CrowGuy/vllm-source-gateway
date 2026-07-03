@@ -100,14 +100,37 @@ Rerun the relevant validation checklist after:
 
 ### Model Discovery
 
-The gateway should provide a read-only model discovery endpoint so users can check which models are currently available without relying on manual email notifications.
+The gateway provides two read-only model discovery surfaces:
 
-For MVP:
+- `GET /v1/models` is the machine-readable compatibility API for clients, SDKs, agents, and OpenAI-aware tools.
+- `GET /models` is a human-readable model catalog for trusted internal users.
+
+`GET /models` has been deployed and validated in production for the current
+single-process, current-model-mix baseline. It is an internal service catalog UI,
+not a new compatibility API path and not an inference endpoint.
+
+For machine-readable discovery:
 
 - expose `GET /v1/models`
 - return models known to the gateway routing registry
 - derive model availability from configured upstreams and health state
 - keep the response user-facing and avoid exposing internal machine IPs
+
+For human-readable discovery:
+
+- expose `GET /models`
+- render a simple internal catalog page for users who need to decide which model to call
+- combine static catalog metadata from `model_catalog` with dynamic availability from routing health state
+- require each `model_catalog` key to exactly match a gateway-facing model id from `GET /v1/models`
+- keep deployment location descriptions abstract, such as `DGX-A100`, `RTX-5090-PC-1`, or `Lab GPU Server`
+- do not expose upstream IPs, upstream URLs, hostnames, bearer tokens, or other topology-sensitive details
+- list only gateway-supported API paths in `api_paths`; currently supported values are `chat`, `responses`, and `messages`
+
+Catalog status semantics:
+
+- `online`: all configured upstreams for that model are currently healthy
+- `degraded`: at least one upstream is healthy and at least one upstream is unhealthy
+- `offline`: zero upstreams for that model are currently healthy
 
 Deferred:
 
@@ -755,6 +778,7 @@ Smoke validation after a Compose deploy:
 curl http://127.0.0.1:8080/livez
 curl http://127.0.0.1:8080/readyz
 curl http://127.0.0.1:8080/v1/models
+curl http://127.0.0.1:8080/models
 ```
 
 ### Post-Deploy Validation Checklist
@@ -790,6 +814,7 @@ curl http://127.0.0.1:8080/readyz
 
 ```bash
 curl -sS http://127.0.0.1:8080/v1/models
+curl -sS http://127.0.0.1:8080/models
 ```
 
 5. non-streaming request path
@@ -1537,6 +1562,7 @@ The MVP should stay intentionally small.
 
 - one gateway service
 - read-only `GET /v1/models`
+- read-only human catalog `GET /models`
 - support for `/v1/chat/completions`
 - support for `/v1/responses`
 - support for `POST /v1/messages` as a native upstream proxy path

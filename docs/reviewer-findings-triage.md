@@ -419,6 +419,19 @@ Result:
 - the current `/v1/responses` path has crossed the initial real-environment validation bar
 - the current compatibility surface is intentionally frozen at `chat/completions`, `responses`, and `messages` while the project finishes launch-stability and operational hardening work
 
+### human-readable `/models` catalog is present and production validated
+
+Current state:
+
+- the gateway now exposes `GET /models` as a trusted internal human-readable model catalog
+- catalog metadata comes from `model_catalog` config and dynamic availability comes from routing health state
+- the page has been deployed and validated in production for the current single-process, current-model-mix baseline
+
+Result:
+
+- internal users now have a readable model catalog without changing the machine-readable `GET /v1/models` contract
+- this does not expand the frozen compatibility API surface; supported proxy paths remain `chat/completions`, `responses`, and `messages`
+
 ### compatibility contract is frozen for the current launch cycle
 
 Current state:
@@ -538,6 +551,7 @@ Why defer:
 
 - current model list shape is acceptable for MVP
 - replica-count exposure can be revisited once auth posture is clearer
+- the human-readable `GET /models` catalog is explicitly scoped to trusted internal users and does not by itself solve public exposure concerns for model discovery surfaces
 
 #### full stateful Responses API semantics
 
