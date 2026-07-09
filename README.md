@@ -8,7 +8,8 @@ This repository provides a thin access layer in front of one or more vLLM servic
 Current launch status:
 
 > Launch-ready for the current single-process, current-model-mix production baseline.
-> Multi-replica same-model routing validation is deferred until the required hardware/topology is available.
+> Same-model multi-upstream round-robin behavior has been validated in production.
+> Same-model connect-stage failover behavior has been validated in production.
 
 Its job is not to replace vLLM. Its job is to handle entry-layer concerns that do not belong inside vLLM itself:
 
@@ -1551,7 +1552,7 @@ Accepted production capacity baseline currently exists for:
 - frozen API paths: `chat/completions`, `responses`, and `messages`
 
 See
-[docs/capacity-baseline-production-model-mix.md](/home/randy/Documents/crow/vllm-source-gateway/docs/capacity-baseline-production-model-mix.md)
+[docs/capacity-baseline-production-model-mix.md](docs/capacity-baseline-production-model-mix.md)
 for the current production baseline summary.
 
 ## MVP Scope
@@ -1601,7 +1602,7 @@ The MVP is successful when:
 7. `department="unknown"` is visible and explainable
 
 One successful real-upstream validation record is documented in
-[docs/e2e-validation-gemma4.md](/home/randy/Documents/crow/vllm-source-gateway/docs/e2e-validation-gemma4.md).
+[docs/e2e-validation-gemma4.md](docs/e2e-validation-gemma4.md).
 
 ## Operational Risks
 
@@ -1609,8 +1610,8 @@ One successful real-upstream validation record is documented in
 - API-key ownership can drift if keys are shared or poorly governed
 - token accounting can become incomplete if upstream usage is missing or parsed inconsistently
 
-Current reviewer-feedback triage and hardening priorities are documented in
-[docs/reviewer-findings-triage.md](/home/randy/Documents/crow/vllm-source-gateway/docs/reviewer-findings-triage.md).
+Historical reviewer-driven launch hardening decisions are recorded in
+[docs/launch-hardening-record.md](docs/launch-hardening-record.md).
 
 ## Recommended Evolution Path
 

@@ -1,16 +1,12 @@
-# Reviewer Findings Triage
+# Launch Hardening Record
 
-This document triages reviewer feedback against the current state of
-`vllm-source-gateway`.
+This document records the reviewer-driven launch hardening work completed for
+`vllm-source-gateway`. It is a historical audit trail, not the active roadmap.
 
-The goal is to separate:
+Use README.md for the current public and operational contract. Use the capacity
+baseline and routing validation playbooks for repeatable validation steps.
 
-- outdated findings that were true in older revisions
-- issues that should be fixed immediately
-- follow-up hardening work
-- items that can be deferred without violating the current MVP boundary
-
-This triage is based on:
+This record is based on:
 
 - the current repository state
 - existing tests
@@ -24,7 +20,8 @@ The current gateway contract is intentionally locked to a **single-process deplo
 Repository status:
 
 - launch-ready for the current single-process, current-model-mix production baseline
-- multi-replica same-model routing validation is deferred until the required hardware/topology is available
+- same-model multi-upstream round-robin behavior has been validated in production
+- same-model connect-stage failover behavior has been validated in production
 
 Current baseline:
 
@@ -488,6 +485,29 @@ Result:
 - the current production baseline is recorded in `docs/capacity-baseline-production-model-mix.md`
 - future model, upstream, host, or topology changes should re-run and update the baseline
 
+### same-model multi-upstream round-robin validation is completed
+
+Current state:
+
+- same-model multi-upstream round-robin behavior has been validated in production
+- this validation covers routing distribution behavior for a real multi-upstream model pool under the current single-process deployment baseline
+
+Result:
+
+- same-model multi-upstream round-robin is no longer a deferred routing-validation item for the current production topology
+
+### same-model connect-stage failover validation is completed
+
+Current state:
+
+- same-model connect-stage failover behavior has been validated in production
+- this validation covers the narrow retry contract where the selected upstream fails during connection setup and another same-model upstream serves the request
+
+Result:
+
+- same-model connect-stage failover is no longer a deferred routing-validation item for the current production topology
+- broader retry semantics remain out of scope; upstream non-2xx responses, read/generation timeouts, and already-started streaming responses are not treated as generic failover cases
+
 ## Next Hardening Batch
 
 - no immediate hardening items remain in the current reviewer-driven batch
@@ -585,19 +605,14 @@ the current production baseline has been established.
 
 ### Next Phase Backlog
 
-These are deferred routing-validation items, not current launch blockers. They should be picked up
-when production has a real multi-replica same-model topology available:
-
-1. validate same-model multi-upstream round-robin behavior when multi-replica model pools are deployed
-2. validate same-model connect-stage failover behavior against a real multi-upstream pool
+- no remaining launch-blocking routing-validation items for the current production topology
 
 ## Suggested Next Order
 
-Recommended next order after the required multi-replica hardware/topology is available:
+Recommended next order:
 
-1. validate same-model multi-upstream round-robin behavior when multi-replica model pools are deployed
-2. validate same-model connect-stage failover behavior against a real multi-upstream pool
-3. keep compatibility expansion frozen unless a separate product decision reopens it
+1. keep compatibility expansion frozen unless a separate product decision reopens it
+2. re-run [same-model-routing-validation-playbook.md](docs/same-model-routing-validation-playbook.md) after model pool, upstream topology, or host-shape changes
 
 ## Assumptions
 

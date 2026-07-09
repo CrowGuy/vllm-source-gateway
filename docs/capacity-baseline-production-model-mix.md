@@ -6,8 +6,8 @@ This document records the initial production capacity baseline for the current p
 mix served through `vllm-source-gateway`.
 
 Current status: the gateway is launch-ready for the current single-process,
-current-model-mix production baseline. Multi-replica same-model routing validation is deferred until
-the required hardware/topology is available.
+current-model-mix production baseline. Same-model multi-upstream round-robin and
+connect-stage failover behavior have both been validated in production.
 
 It includes:
 
@@ -341,8 +341,6 @@ Operational notes:
 
 Not yet covered by this document:
 
-- same-model multi-upstream round-robin validation
-- same-model multi-upstream connect-stage failover validation
 - maximum throughput benchmarking
 - multi-worker or horizontally scaled shared-state behavior
 
@@ -351,24 +349,19 @@ Not yet covered by this document:
 This section defines the remaining validation work for model pools with more than one upstream
 serving the same public model name.
 
-Round-robin validation requires:
+Round-robin validation status:
 
-- configure one model with at least two healthy upstreams
-- send repeated short requests for that model through `chat`, `responses`, and `messages`
-- confirm both upstreams receive traffic using gateway structured logs or upstream access logs
-- confirm no unexpected gateway-origin failures occur
-- confirm `/v1/models` reports the expected healthy upstream count
+- same-model multi-upstream round-robin behavior has been validated in production
+- this capacity document does not keep the raw round-robin evidence
 
 Connect-stage failover validation requires:
 
-- configure one model with at least two upstreams
-- make one upstream fail before a response is received, for example by using an unreachable
-  address or stopping that upstream
-- keep another upstream healthy for the same model
-- send requests through the gateway for that model
-- confirm the request succeeds through the healthy upstream
-- confirm upstream non-2xx responses and already-started streaming responses are not treated as
-  generic retry cases
+- same-model connect-stage failover behavior has been validated in production
+- use the dedicated validation flow in
+  [same-model-routing-validation-playbook.md](docs/same-model-routing-validation-playbook.md)
+  when this validation must be repeated after topology or host-shape changes
+- keep confirming upstream non-2xx responses and already-started streaming responses are not treated
+  as generic retry cases
 
 These checks are intentionally separate from capacity baseline testing because they validate routing
 correctness and failure handling, not steady-state user-facing capacity.

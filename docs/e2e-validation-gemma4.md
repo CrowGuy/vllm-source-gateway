@@ -37,8 +37,8 @@ uv sync --extra dev
 
 ## Files
 
-- [`config.e2e.gemma4.yaml`](/home/randy/Documents/crow/vllm-source-gateway/config.e2e.gemma4.yaml)
-- [`e2e_validate_gemma4.sh`](/home/randy/Documents/crow/vllm-source-gateway/e2e_validate_gemma4.sh)
+- [`config.e2e.gemma4.yaml`](config.e2e.gemma4.yaml)
+- [`e2e_validate_gemma4.sh`](e2e_validate_gemma4.sh)
 
 ## Validation Inputs
 
@@ -203,4 +203,4 @@ This validation did not cover:
 
 For current `messages` and `responses` production validation steps, use the
 maintenance checklists in
-[README.md](/home/randy/Documents/crow/vllm-source-gateway/README.md).
+[README.md](README.md).
