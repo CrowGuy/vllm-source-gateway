@@ -68,6 +68,15 @@ def test_chat_completions_proxies_success_and_records_usage(
         'gateway_source_resolution_total{department="dept-a",resolution_source="api_key"} 1.0'
         in metrics_text
     )
+    assert (
+        'gateway_upstream_selections_total{model_name="shared-model",upstream_name="gpu-a"} 1.0'
+        in metrics_text
+    )
+    assert (
+        ('gateway_upstream_request_duration_seconds_count{endpoint="chat_completions",'
+         'model_name="shared-model",upstream_name="gpu-a"} 1.0')
+        in metrics_text
+    )
 
 
 def test_chat_completions_returns_404_for_unknown_model(app_client) -> None:
@@ -114,6 +123,7 @@ def test_chat_completions_returns_504_on_upstream_timeout(
         'gateway_http_request_failures_total{department="dept-a",endpoint="chat_completions",failure_origin="gateway",method="POST",status_class="5xx"} 1.0'
         in metrics_text
     )
+    assert "gateway_upstream_request_duration_seconds_count" not in metrics_text
 
 
 def test_chat_completions_failsover_to_second_upstream_on_connect_error(
@@ -152,6 +162,26 @@ def test_chat_completions_failsover_to_second_upstream_on_connect_error(
     ]
     assert recorder["headers"]["authorization"] == "Bearer upstream-token-b"
 
+    metrics_text = app_client.get("/metrics").text
+    assert (
+        'gateway_upstream_selections_total{model_name="shared-model",upstream_name="gpu-a"} 1.0'
+        in metrics_text
+    )
+    assert (
+        'gateway_upstream_selections_total{model_name="shared-model",upstream_name="gpu-b"} 1.0'
+        in metrics_text
+    )
+    assert (
+        ('gateway_upstream_request_duration_seconds_count{endpoint="chat_completions",'
+         'model_name="shared-model",upstream_name="gpu-b"} 1.0')
+        in metrics_text
+    )
+    assert (
+        ('gateway_upstream_request_duration_seconds_count{endpoint="chat_completions",'
+         'model_name="shared-model",upstream_name="gpu-a"}')
+        not in metrics_text
+    )
+
 
 def test_chat_completions_tracks_upstream_origin_failures(
     app_client,
@@ -179,6 +209,11 @@ def test_chat_completions_tracks_upstream_origin_failures(
     metrics_text = app_client.get("/metrics").text
     assert (
         'gateway_http_request_failures_total{department="dept-a",endpoint="chat_completions",failure_origin="upstream",method="POST",status_class="5xx"} 1.0'
+        in metrics_text
+    )
+    assert (
+        ('gateway_upstream_request_duration_seconds_count{endpoint="chat_completions",'
+         'model_name="shared-model",upstream_name="gpu-a"} 1.0')
         in metrics_text
     )
 
@@ -225,6 +260,15 @@ def test_chat_completions_streams_sse_and_records_usage(
         'gateway_token_accounting_total{accounting_status="recorded",endpoint="chat_completions"} 1.0'
         in metrics_text
     )
+    assert (
+        'gateway_upstream_selections_total{model_name="shared-model",upstream_name="gpu-a"} 1.0'
+        in metrics_text
+    )
+    assert (
+        ('gateway_stream_first_chunk_seconds_count{department="dept-a",'
+         'endpoint="chat_completions",model_name="shared-model"} 1.0')
+        in metrics_text
+    )
 
 
 def test_chat_completions_streaming_failsover_to_second_upstream_on_connect_error(
@@ -263,6 +307,86 @@ def test_chat_completions_streaming_failsover_to_second_upstream_on_connect_erro
         "http://10.0.0.2:8000/v1/chat/completions",
     ]
     assert recorder["headers"]["authorization"] == "Bearer upstream-token-b"
+
+    metrics_text = app_client.get("/metrics").text
+    assert (
+        'gateway_upstream_selections_total{model_name="shared-model",upstream_name="gpu-a"} 1.0'
+        in metrics_text
+    )
+    assert (
+        'gateway_upstream_selections_total{model_name="shared-model",upstream_name="gpu-b"} 1.0'
+        in metrics_text
+    )
+
+
+def test_chat_completions_empty_stream_does_not_record_first_chunk_latency(
+    app_client,
+    install_fake_async_client,
+) -> None:
+    install_fake_async_client(
+        app_client=app_client,
+        stream_response=FakeStreamingUpstreamResponse(chunks=[]),
+    )
+
+    with app_client.stream(
+        "POST",
+        "/v1/chat/completions",
+        headers={"x-api-key": "key-dept-a"},
+        json={
+            "model": "shared-model",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    ) as response:
+        body = b"".join(response.iter_bytes())
+
+    assert response.status_code == 200
+    assert body == b""
+
+    metrics_text = app_client.get("/metrics").text
+    assert "gateway_stream_first_chunk_seconds_count" not in metrics_text
+
+
+def test_chat_completions_disconnect_before_first_chunk_does_not_record_first_chunk_latency(
+    app_client,
+    install_fake_async_client,
+    monkeypatch,
+) -> None:
+    from starlette.requests import Request
+
+    async def disconnected(_self):
+        return True
+
+    monkeypatch.setattr(Request, "is_disconnected", disconnected)
+    install_fake_async_client(
+        app_client=app_client,
+        stream_response=FakeStreamingUpstreamResponse(
+            chunks=[b'data: {"id":"chunk-1","choices":[{"delta":{"content":"late"}}]}\n\n']
+        ),
+    )
+
+    with app_client.stream(
+        "POST",
+        "/v1/chat/completions",
+        headers={"x-api-key": "key-dept-a"},
+        json={
+            "model": "shared-model",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    ) as response:
+        body = b"".join(response.iter_bytes())
+
+    assert response.status_code == 200
+    assert body == b""
+
+    metrics_text = app_client.get("/metrics").text
+    assert "gateway_stream_first_chunk_seconds_count" not in metrics_text
+    assert (
+        'gateway_token_accounting_total{accounting_status="missing_usage",'
+        'endpoint="chat_completions"} 1.0'
+        in metrics_text
+    )
 
 
 def test_chat_completions_unexpected_500_is_recorded_by_metrics_middleware(

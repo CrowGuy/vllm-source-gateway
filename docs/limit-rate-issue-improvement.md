@@ -62,9 +62,9 @@
 - **Gateway 新增 in-flight 與 upstream latency**  
   建議 metrics：
   - `gateway_inflight_requests{department,model_name,endpoint}`：phase 1 已完成。
-  - `gateway_upstream_request_duration_seconds{model_name,upstream_name,endpoint}`：phase 2。
-  - `gateway_stream_first_chunk_seconds{department,model_name,endpoint}`：phase 2。
-  - `gateway_upstream_selections_total{model_name,upstream_name}`：phase 2。
+  - `gateway_upstream_request_duration_seconds{model_name,upstream_name,endpoint}`：phase 2 已完成；第一版量測 non-streaming full upstream POST duration。
+  - `gateway_stream_first_chunk_seconds{department,model_name,endpoint}`：phase 2 已完成；第一版量測 streaming upstream first non-empty chunk latency。
+  - `gateway_upstream_selections_total{model_name,upstream_name}`：phase 2 已完成。
 
   `tokens/request` 不需要 gateway 新 counter，可由 dashboard 用既有
   `gateway_prompt_tokens_total`、`gateway_generation_tokens_total` 和 request counter 推導。

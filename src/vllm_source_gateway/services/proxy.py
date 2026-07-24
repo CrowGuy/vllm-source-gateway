@@ -4,6 +4,7 @@ import asyncio
 import codecs
 import json
 import logging
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -295,6 +296,11 @@ def _select_upstream(
             detail=str(exc),
         ) from exc
 
+    metrics.record_upstream_selection(
+        model_name=model_name,
+        upstream_name=selected.upstream.name,
+    )
+
     return selected.upstream.base_url, selected.upstream.authorization_token, selected.upstream.name
 
 
@@ -419,6 +425,7 @@ async def _proxy_streaming_response(
     max_sse_decode_buffer_bytes = config.server.max_sse_decode_buffer_bytes
 
     while True:
+        upstream_first_chunk_started_at: float | None = None
         request_headers = _build_upstream_headers(
             request,
             authorization_token=upstream_authorization_token,
@@ -435,6 +442,7 @@ async def _proxy_streaming_response(
                 upstream_request,
                 stream=True,
             )
+            upstream_first_chunk_started_at = time.perf_counter()
             break
         except httpx.HTTPError as exc:
             if _is_connect_stage_retryable_error(exc):
@@ -484,12 +492,26 @@ async def _proxy_streaming_response(
         decoder = codecs.getincrementaldecoder("utf-8")()
         client_disconnected = False
         stream_failed = False
+        first_chunk_recorded = False
 
         try:
             async for chunk in upstream_response.aiter_bytes():
                 if await request.is_disconnected():
                     client_disconnected = True
                     break
+
+                if (
+                    chunk
+                    and not first_chunk_recorded
+                    and upstream_first_chunk_started_at is not None
+                ):
+                    metrics.observe_stream_first_chunk(
+                        department=department,
+                        model_name=model_name,
+                        endpoint=endpoint_name,
+                        duration_seconds=time.perf_counter() - upstream_first_chunk_started_at,
+                    )
+                    first_chunk_recorded = True
 
                 if parsing_enabled and chunk:
                     try:
@@ -706,6 +728,7 @@ async def proxy_json_endpoint(
         attempted_upstream_names = {upstream_name}
         while True:
             try:
+                upstream_request_started_at = time.perf_counter()
                 upstream_response = await upstream_http_client.post(
                     f"{upstream_base_url}{upstream_path}",
                     json=payload,
@@ -714,6 +737,12 @@ async def proxy_json_endpoint(
                         authorization_token=upstream_authorization_token,
                     ),
                     timeout=request_timeout,
+                )
+                metrics.observe_upstream_request_duration(
+                    model_name=model_name,
+                    upstream_name=upstream_name,
+                    endpoint=endpoint_name,
+                    duration_seconds=time.perf_counter() - upstream_request_started_at,
                 )
                 break
             except httpx.HTTPError as exc:

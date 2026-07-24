@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
 
-
 REQUEST_DURATION_BUCKETS = (
     0.1,
     0.5,
@@ -97,6 +96,26 @@ class GatewayMetrics:
             labelnames=("department", "model_name"),
             registry=self.registry,
         )
+        self.upstream_request_duration_seconds = Histogram(
+            "gateway_upstream_request_duration_seconds",
+            "Full non-streaming upstream request duration in seconds.",
+            labelnames=("model_name", "upstream_name", "endpoint"),
+            buckets=REQUEST_DURATION_BUCKETS,
+            registry=self.registry,
+        )
+        self.stream_first_chunk_seconds = Histogram(
+            "gateway_stream_first_chunk_seconds",
+            "Streaming upstream first chunk latency in seconds.",
+            labelnames=("department", "model_name", "endpoint"),
+            buckets=REQUEST_DURATION_BUCKETS,
+            registry=self.registry,
+        )
+        self.upstream_selections_total = Counter(
+            "gateway_upstream_selections_total",
+            "Successful upstream selections by model and upstream.",
+            labelnames=("model_name", "upstream_name"),
+            registry=self.registry,
+        )
 
     def observe_request(
         self,
@@ -144,7 +163,10 @@ class GatewayMetrics:
     def record_prompt_tokens(self, *, department: str, model_name: str, prompt_tokens: int) -> None:
         if prompt_tokens <= 0:
             return
-        self.prompt_tokens_total.labels(department=department, model_name=model_name).inc(prompt_tokens)
+        self.prompt_tokens_total.labels(
+            department=department,
+            model_name=model_name,
+        ).inc(prompt_tokens)
 
     def record_generation_tokens(
         self, *, department: str, model_name: str, generation_tokens: int
@@ -201,4 +223,38 @@ class GatewayMetrics:
         self.retry_guard_open_total.labels(
             department=department,
             model_name=model_name,
+        ).inc()
+
+    def observe_upstream_request_duration(
+        self,
+        *,
+        model_name: str,
+        upstream_name: str,
+        endpoint: str,
+        duration_seconds: float,
+    ) -> None:
+        self.upstream_request_duration_seconds.labels(
+            model_name=model_name,
+            upstream_name=upstream_name,
+            endpoint=endpoint,
+        ).observe(duration_seconds)
+
+    def observe_stream_first_chunk(
+        self,
+        *,
+        department: str,
+        model_name: str,
+        endpoint: str,
+        duration_seconds: float,
+    ) -> None:
+        self.stream_first_chunk_seconds.labels(
+            department=department,
+            model_name=model_name,
+            endpoint=endpoint,
+        ).observe(duration_seconds)
+
+    def record_upstream_selection(self, *, model_name: str, upstream_name: str) -> None:
+        self.upstream_selections_total.labels(
+            model_name=model_name,
+            upstream_name=upstream_name,
         ).inc()

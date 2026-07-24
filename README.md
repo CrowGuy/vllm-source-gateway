@@ -1280,10 +1280,10 @@ Observability scope:
 - access logging follows the same bias toward operationally relevant proxy traffic
 - admission-control phase 1 exposes enforcement and safety signals such as rejections, admitted
   in-flight requests, token-budget rejections, and retry-guard openings
-- capacity-tuning observability is phase 2: gateway-level upstream request duration, stream first
-  chunk latency, and upstream selection counters are not yet emitted
-- current gateway metrics can show who is admitted or rejected, but they cannot by themselves identify
-  which upstream has degraded latency or TTFT
+- capacity-tuning observability phase 2 exposes gateway-level upstream request duration, stream
+  first chunk latency, and upstream selection counters
+- gateway upstream request duration currently measures non-streaming full upstream POST duration;
+  streaming duration is represented by first upstream chunk latency, not full stream duration
 
 ### Required Metrics
 
@@ -1354,6 +1354,62 @@ Labels emitted by this repo:
 Semantic rules:
 
 - increment only when generation token usage is known for the completed request
+
+#### `gateway_upstream_request_duration_seconds_bucket`
+
+Labels emitted by this repo:
+
+- `model_name`
+- `upstream_name`
+- `endpoint`
+- `le`
+
+Semantic rules:
+
+- measure full non-streaming upstream POST duration after a successful upstream response exists
+- record `2xx`, `4xx`, and `5xx` upstream responses
+- do not record timeout or connect-stage attempts that never return an upstream response
+- `upstream_name` must be the bounded configured upstream name
+
+#### `gateway_stream_first_chunk_seconds_bucket`
+
+Labels emitted by this repo:
+
+- `department`
+- `model_name`
+- `endpoint`
+- `le`
+
+Semantic rules:
+
+- measure time from successful upstream streaming response setup to the first non-empty upstream
+  bytes chunk
+- record at most once per streaming response
+- do not record empty streams, client disconnect before first chunk, or stream errors before first
+  chunk
+- this is gateway-observed upstream first-chunk latency, not client-perceived end-to-end TTFT
+
+#### `gateway_upstream_selections_total`
+
+Labels emitted by this repo:
+
+- `model_name`
+- `upstream_name`
+
+Semantic rules:
+
+- increment each time routing successfully selects an upstream
+- connect-stage failover records each successful replacement upstream selection
+- unknown model and no-healthy-upstream failures do not increment this metric
+
+Boundary notes:
+
+- `gateway_stream_first_chunk_seconds_bucket` currently uses the same LLM-oriented buckets as
+  gateway request duration. If first-chunk latency becomes a fine-grained capacity-tuning signal,
+  introduce dedicated smaller TTFT buckets in a separate metrics-contract change.
+- phase 2 upstream metrics intentionally do not share identical labels: upstream duration and
+  selection omit `department` to keep upstream diagnosis cardinality low, while stream first chunk
+  latency includes `department` to support caller-impact attribution.
 
 ### Recommended Validation Metrics
 
