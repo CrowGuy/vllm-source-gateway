@@ -9,6 +9,7 @@ from vllm_source_gateway.config import AppConfig
 from vllm_source_gateway.dependencies import (
     SourceResolutionResult,
     get_app_config,
+    get_admission_controller,
     get_gateway_metrics,
     get_routing_registry,
     get_source_resolution_result,
@@ -17,6 +18,7 @@ from vllm_source_gateway.dependencies import (
 )
 from vllm_source_gateway.metrics import GatewayMetrics
 from vllm_source_gateway.routing import RoutingRegistry
+from vllm_source_gateway.services.admission_control import AdmissionController
 from vllm_source_gateway.services.proxy import proxy_json_endpoint
 
 
@@ -54,6 +56,7 @@ async def messages(
     config: AppConfig = Depends(get_app_config),
     routing_registry: RoutingRegistry = Depends(get_routing_registry),
     metrics: GatewayMetrics = Depends(get_gateway_metrics),
+    admission_controller: AdmissionController = Depends(get_admission_controller),
     source_resolution: SourceResolutionResult = Depends(get_source_resolution_result),
     upstream_http_client: httpx.AsyncClient = Depends(get_upstream_http_client),
     upstream_streaming_http_client: httpx.AsyncClient = Depends(get_upstream_streaming_http_client),
@@ -63,6 +66,7 @@ async def messages(
         config=config,
         routing_registry=routing_registry,
         metrics=metrics,
+        admission_controller=admission_controller,
         source_resolution=source_resolution,
         upstream_http_client=upstream_http_client,
         upstream_streaming_http_client=upstream_streaming_http_client,

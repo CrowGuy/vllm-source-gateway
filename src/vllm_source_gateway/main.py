@@ -32,6 +32,7 @@ from vllm_source_gateway.routers.messages import router as messages_router
 from vllm_source_gateway.routers.models import router as models_router
 from vllm_source_gateway.routers.responses import router as responses_router
 from vllm_source_gateway.routing import RoutingRegistry
+from vllm_source_gateway.services.admission_control import AdmissionController
 from vllm_source_gateway.services.upstream_health import UpstreamHealthMonitor
 
 logger = configure_application_logging(level=logging.INFO)
@@ -66,6 +67,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         config = load_config(resolved_config_path)
         routing_registry = RoutingRegistry.from_config(config)
         metrics = GatewayMetrics()
+        admission_controller = AdmissionController(config=config, metrics=metrics)
         upstream_http_client = httpx.AsyncClient(limits=UPSTREAM_CLIENT_LIMITS)
         upstream_streaming_http_client = httpx.AsyncClient(
             limits=UPSTREAM_CLIENT_LIMITS,
@@ -80,6 +82,7 @@ def create_app(config_path: str | Path | None = None) -> FastAPI:
         app.state.config_path = str(resolved_config_path)
         app.state.routing_registry = routing_registry
         app.state.metrics = metrics
+        app.state.admission_controller = admission_controller
         app.state.upstream_http_client = upstream_http_client
         app.state.upstream_streaming_http_client = upstream_streaming_http_client
         app.state.upstream_health_monitor = upstream_health_monitor

@@ -1278,6 +1278,12 @@ Observability scope:
 - `/v1/chat/completions`, `/v1/responses`, and `/v1/messages` are the primary routes expected to feed department-level request, token, and failure views
 - `/v1/models`, `/livez`, `/readyz`, `/healthz`, `/metrics`, generic `404` responses, and some pre-proxy failures are not currently first-class parts of the source-attributed metrics contract
 - access logging follows the same bias toward operationally relevant proxy traffic
+- admission-control phase 1 exposes enforcement and safety signals such as rejections, admitted
+  in-flight requests, token-budget rejections, and retry-guard openings
+- capacity-tuning observability is phase 2: gateway-level upstream request duration, stream first
+  chunk latency, and upstream selection counters are not yet emitted
+- current gateway metrics can show who is admitted or rejected, but they cannot by themselves identify
+  which upstream has degraded latency or TTFT
 
 ### Required Metrics
 
@@ -1444,7 +1450,26 @@ For MVP planning:
 - prioritize stable networking, moderate CPU, and enough memory for concurrent connections
 - current deployment baseline is single process / single worker per container
 - current in-memory routing, health, and metrics state are intentionally accepted under that baseline
+- admission-control concurrency, retry-guard, and token-budget state is also process-local; keep production
+  admission-control deployments on one uvicorn worker
+- admission-control model and department limits are upstream-admission controls: requests must be
+  read and parsed before the gateway knows the target model, so these limits protect vLLM queues but
+  do not cap concurrent body reads or JSON parsing inside the gateway
+- v1 admission-control fairness is department-level: it can protect other departments from a noisy
+  department, but it does not separate human interactive traffic from coding-agent or batch traffic
+  inside the same department bucket
+- use separate bounded department identities such as `data_platform_human` and `data_platform_agent`
+  for immediate human/agent separation; a dedicated bounded `workload_class` dimension is future work
+- `department="unknown"` is fallback attribution, not a configured department; department-scoped
+  admission limits cannot target it
+- use `security.reject_unknown_api_keys=true` to reject unknown callers, or `global_model_limits`
+  to protect a model pool from all callers including unknown traffic
+- `admission_control.enabled: false` allows draft admission references; cross-reference validation
+  runs only when admission control is enabled, so validate enabled configs before rollout
+- protect the gateway ingress separately with body-size, connection, request-rate, and timeout limits
+  at the reverse proxy or load balancer when large-body floods are a concern
 - treat multi-worker or horizontally scaled shared-state support as future architecture work, not a current guarantee
+- use shared state such as Redis before treating these limits as global across workers or replicas
 
 Representative starting point:
 

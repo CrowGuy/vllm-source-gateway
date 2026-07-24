@@ -8,6 +8,7 @@ from fastapi import Depends, Header, Request
 from vllm_source_gateway.config import AppConfig
 from vllm_source_gateway.metrics import GatewayMetrics
 from vllm_source_gateway.routing import RoutingRegistry
+from vllm_source_gateway.services.admission_control import AdmissionController
 
 
 UNKNOWN_DEPARTMENT = "unknown"
@@ -43,6 +44,13 @@ def get_gateway_metrics(request: Request) -> GatewayMetrics:
     if metrics is None:
         raise DependencyStateError("metrics registry is not loaded")
     return metrics
+
+
+def get_admission_controller(request: Request) -> AdmissionController:
+    admission_controller = getattr(request.app.state, "admission_controller", None)
+    if admission_controller is None:
+        raise DependencyStateError("admission controller is not loaded")
+    return admission_controller
 
 
 def get_upstream_http_client(request: Request) -> httpx.AsyncClient:

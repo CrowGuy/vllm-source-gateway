@@ -5,6 +5,42 @@ import pytest
 from vllm_source_gateway.config import ConfigError, load_config
 
 
+def _valid_admission_control_config() -> dict:
+    return {
+        "enabled": True,
+        "global_model_limits": {
+            "shared-model": {"max_active_requests": 8},
+        },
+        "department_model_limits": [
+            {
+                "department": "dept-a",
+                "model_name": "shared-model",
+                "max_active_requests": 2,
+            }
+        ],
+        "token_budgets": [
+            {
+                "department": "dept-a",
+                "model_name": "shared-model",
+                "max_tokens": 1000,
+                "window_seconds": 60,
+            }
+        ],
+        "request_shape_limits": {
+            "shared-model": {
+                "max_request_body_bytes": 4096,
+                "max_output_tokens": 128,
+            }
+        },
+        "retry_guard": {
+            "enabled": True,
+            "window_seconds": 10,
+            "max_events": 3,
+            "cooldown_seconds": 5,
+        },
+    }
+
+
 def test_load_config_returns_validated_app_config(sample_config_path) -> None:
     config = load_config(sample_config_path)
 
@@ -17,6 +53,194 @@ def test_load_config_returns_validated_app_config(sample_config_path) -> None:
     assert config.departments["dept-a"].api_keys == ["key-dept-a"]
     assert config.upstreams[0].authorization_token == "upstream-token-a"
     assert config.upstreams[1].authorization_token == "upstream-token-b"
+    assert config.admission_control.enabled is False
+
+
+def test_load_config_accepts_admission_control(sample_config_copy, write_config) -> None:
+    sample_config_copy["admission_control"] = _valid_admission_control_config()
+    sample_config_copy["admission_control"]["default_retry_after_seconds"] = 17
+    config_path = write_config(sample_config_copy, filename="admission-control.yaml")
+
+    config = load_config(config_path)
+
+    assert config.admission_control.enabled is True
+    assert config.admission_control.global_model_limits["shared-model"].max_active_requests == 8
+    assert config.admission_control.department_model_limits[0].max_active_requests == 2
+    assert config.admission_control.token_budgets[0].max_tokens == 1000
+    assert config.admission_control.request_shape_limits["shared-model"].max_output_tokens == 128
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected_error"),
+    [
+        (
+            lambda admission_control: admission_control["global_model_limits"].__setitem__(
+                "missing-model",
+                {"max_active_requests": 1},
+            ),
+            "global_model_limits references unknown model 'missing-model'.*"
+            "allowed models: model-a, model-b, shared-model",
+        ),
+        (
+            lambda admission_control: admission_control["request_shape_limits"].__setitem__(
+                "missing-model",
+                {"max_output_tokens": 128},
+            ),
+            "request_shape_limits references unknown model 'missing-model'.*"
+            "allowed models: model-a, model-b, shared-model",
+        ),
+        (
+            lambda admission_control: admission_control["department_model_limits"].__setitem__(
+                0,
+                {
+                    "department": "missing-dept",
+                    "model_name": "shared-model",
+                    "max_active_requests": 2,
+                },
+            ),
+            "department_model_limits references unknown department 'missing-dept'.*"
+            "allowed departments: dept-a, dept-b",
+        ),
+        (
+            lambda admission_control: admission_control["department_model_limits"].__setitem__(
+                0,
+                {
+                    "department": "dept-a",
+                    "model_name": "missing-model",
+                    "max_active_requests": 2,
+                },
+            ),
+            "department_model_limits references unknown model 'missing-model'.*"
+            "allowed models: model-a, model-b, shared-model",
+        ),
+        (
+            lambda admission_control: admission_control["token_budgets"].__setitem__(
+                0,
+                {
+                    "department": "missing-dept",
+                    "model_name": "shared-model",
+                    "max_tokens": 1000,
+                    "window_seconds": 60,
+                },
+            ),
+            "token_budgets references unknown department 'missing-dept'.*"
+            "allowed departments: dept-a, dept-b",
+        ),
+        (
+            lambda admission_control: admission_control["token_budgets"].__setitem__(
+                0,
+                {
+                    "department": "dept-a",
+                    "model_name": "missing-model",
+                    "max_tokens": 1000,
+                    "window_seconds": 60,
+                },
+            ),
+            "token_budgets references unknown model 'missing-model'.*"
+            "allowed models: model-a, model-b, shared-model",
+        ),
+    ],
+)
+def test_load_config_rejects_enabled_admission_unknown_references(
+    sample_config_copy,
+    write_config,
+    mutate,
+    expected_error,
+) -> None:
+    admission_control = _valid_admission_control_config()
+    mutate(admission_control)
+    sample_config_copy["admission_control"] = admission_control
+    config_path = write_config(sample_config_copy, filename="bad-admission-reference.yaml")
+
+    with pytest.raises(ConfigError, match=expected_error):
+        load_config(config_path)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "duplicate_entry", "expected_error"),
+    [
+        (
+            "department_model_limits",
+            {
+                "department": "dept-a",
+                "model_name": "shared-model",
+                "max_active_requests": 3,
+            },
+            "department_model_limits contains duplicate department/model pair "
+            "'dept-a'/'shared-model'",
+        ),
+        (
+            "token_budgets",
+            {
+                "department": "dept-a",
+                "model_name": "shared-model",
+                "max_tokens": 2000,
+                "window_seconds": 120,
+            },
+            "token_budgets contains duplicate department/model pair 'dept-a'/'shared-model'",
+        ),
+    ],
+)
+def test_load_config_rejects_enabled_admission_duplicate_department_model_pairs(
+    sample_config_copy,
+    write_config,
+    field_name,
+    duplicate_entry,
+    expected_error,
+) -> None:
+    admission_control = _valid_admission_control_config()
+    admission_control[field_name].append(duplicate_entry)
+    sample_config_copy["admission_control"] = admission_control
+    config_path = write_config(sample_config_copy, filename="duplicate-admission-pair.yaml")
+
+    with pytest.raises(ConfigError, match=expected_error):
+        load_config(config_path)
+
+
+def test_load_config_allows_disabled_admission_unknown_references(
+    sample_config_copy,
+    write_config,
+) -> None:
+    sample_config_copy["admission_control"] = {
+        "enabled": False,
+        "global_model_limits": {"missing-model": {"max_active_requests": 1}},
+        "department_model_limits": [
+            {
+                "department": "missing-dept",
+                "model_name": "missing-model",
+                "max_active_requests": 1,
+            }
+        ],
+        "token_budgets": [
+            {
+                "department": "missing-dept",
+                "model_name": "missing-model",
+                "max_tokens": 1000,
+                "window_seconds": 60,
+            }
+        ],
+        "request_shape_limits": {"missing-model": {"max_output_tokens": 128}},
+    }
+    config_path = write_config(sample_config_copy, filename="disabled-admission-draft.yaml")
+
+    config = load_config(config_path)
+
+    assert config.admission_control.enabled is False
+
+
+def test_load_config_rejects_empty_admission_control_model_key(
+    sample_config_copy,
+    write_config,
+) -> None:
+    sample_config_copy["admission_control"] = {
+        "global_model_limits": {
+            " ": {"max_active_requests": 1},
+        },
+    }
+    config_path = write_config(sample_config_copy, filename="bad-admission-control.yaml")
+
+    with pytest.raises(ConfigError, match="global_model_limits keys must be non-empty"):
+        load_config(config_path)
 
 
 def test_load_config_resolves_department_api_keys_from_env(
@@ -145,7 +369,10 @@ def test_load_config_rejects_missing_upstream_authorization_env(
     monkeypatch.delenv("UPSTREAM_MODEL_A_TOKEN", raising=False)
     config_path = write_config(sample_config_copy, filename="missing-upstream-auth-env.yaml")
 
-    with pytest.raises(ConfigError, match="authorization_from_env 'UPSTREAM_MODEL_A_TOKEN' is not set"):
+    with pytest.raises(
+        ConfigError,
+        match="authorization_from_env 'UPSTREAM_MODEL_A_TOKEN' is not set",
+    ):
         load_config(config_path)
 
 
@@ -158,7 +385,10 @@ def test_load_config_rejects_empty_upstream_authorization_env(
     monkeypatch.setenv("UPSTREAM_MODEL_A_TOKEN", "   ")
     config_path = write_config(sample_config_copy, filename="empty-upstream-auth-env.yaml")
 
-    with pytest.raises(ConfigError, match="authorization_from_env 'UPSTREAM_MODEL_A_TOKEN' is empty"):
+    with pytest.raises(
+        ConfigError,
+        match="authorization_from_env 'UPSTREAM_MODEL_A_TOKEN' is empty",
+    ):
         load_config(config_path)
 
 

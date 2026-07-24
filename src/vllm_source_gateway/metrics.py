@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from prometheus_client import CollectorRegistry, Counter, Histogram
+from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
 
 
 REQUEST_DURATION_BUCKETS = (
@@ -73,6 +73,30 @@ class GatewayMetrics:
             labelnames=("endpoint", "accounting_status"),
             registry=self.registry,
         )
+        self.admission_rejections_total = Counter(
+            "gateway_admission_rejections_total",
+            "Admission control rejections by bounded reason.",
+            labelnames=("department", "model_name", "reason"),
+            registry=self.registry,
+        )
+        self.inflight_requests = Gauge(
+            "gateway_inflight_requests",
+            "Currently admitted in-flight requests.",
+            labelnames=("department", "model_name", "endpoint"),
+            registry=self.registry,
+        )
+        self.token_budget_rejections_total = Counter(
+            "gateway_token_budget_rejections_total",
+            "Token budget admission rejections.",
+            labelnames=("department", "model_name"),
+            registry=self.registry,
+        )
+        self.retry_guard_open_total = Counter(
+            "gateway_retry_guard_open_total",
+            "Retry guard cooldown openings.",
+            labelnames=("department", "model_name"),
+            registry=self.registry,
+        )
 
     def observe_request(
         self,
@@ -142,4 +166,39 @@ class GatewayMetrics:
         self.token_accounting_total.labels(
             endpoint=endpoint,
             accounting_status=accounting_status,
+        ).inc()
+
+    def record_admission_rejection(
+        self, *, department: str, model_name: str, reason: str
+    ) -> None:
+        self.admission_rejections_total.labels(
+            department=department,
+            model_name=model_name,
+            reason=reason,
+        ).inc()
+
+    def inc_inflight_request(self, *, department: str, model_name: str, endpoint: str) -> None:
+        self.inflight_requests.labels(
+            department=department,
+            model_name=model_name,
+            endpoint=endpoint,
+        ).inc()
+
+    def dec_inflight_request(self, *, department: str, model_name: str, endpoint: str) -> None:
+        self.inflight_requests.labels(
+            department=department,
+            model_name=model_name,
+            endpoint=endpoint,
+        ).dec()
+
+    def record_token_budget_rejection(self, *, department: str, model_name: str) -> None:
+        self.token_budget_rejections_total.labels(
+            department=department,
+            model_name=model_name,
+        ).inc()
+
+    def record_retry_guard_open(self, *, department: str, model_name: str) -> None:
+        self.retry_guard_open_total.labels(
+            department=department,
+            model_name=model_name,
         ).inc()

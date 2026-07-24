@@ -4,7 +4,8 @@ import asyncio
 import codecs
 import json
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import httpx
 from fastapi import HTTPException, Request, Response, status
@@ -14,11 +15,12 @@ from vllm_source_gateway.config import AppConfig
 from vllm_source_gateway.dependencies import SourceResolutionResult
 from vllm_source_gateway.metrics import GatewayMetrics
 from vllm_source_gateway.request_metrics import (
-    set_request_metrics_failure_origin,
     set_request_metrics_context,
+    set_request_metrics_failure_origin,
     set_request_metrics_status_override,
 )
 from vllm_source_gateway.routing import NoHealthyUpstreamError, RoutingRegistry, UnknownModelError
+from vllm_source_gateway.services.admission_control import AdmissionController, AdmissionLease
 
 UsageExtractor = Callable[[dict[str, Any]], tuple[int, int] | None]
 logger = logging.getLogger("vllm_source_gateway.proxy")
@@ -98,14 +100,14 @@ def _record_usage(
     model_name: str,
     upstream_status_code: int,
     usage: tuple[int, int] | None,
-) -> None:
+) -> tuple[int, int] | None:
     if not 200 <= upstream_status_code < 300:
         metrics.record_token_accounting(endpoint=endpoint_name, accounting_status="missing_usage")
-        return
+        return None
 
     if usage is None:
         metrics.record_token_accounting(endpoint=endpoint_name, accounting_status="missing_usage")
-        return
+        return None
 
     prompt_tokens, generation_tokens = usage
     metrics.record_prompt_tokens(
@@ -119,6 +121,7 @@ def _record_usage(
         generation_tokens=generation_tokens,
     )
     metrics.record_token_accounting(endpoint=endpoint_name, accounting_status="recorded")
+    return usage
 
 
 def _raise_http_error(
@@ -178,7 +181,7 @@ async def _read_json_request_body(
     config: AppConfig,
     metrics: GatewayMetrics,
     endpoint_name: str,
-) -> Any:
+) -> tuple[Any, int]:
     max_request_body_bytes = config.server.max_request_body_bytes
 
     if _content_length_exceeds_limit(request, max_request_body_bytes):
@@ -206,7 +209,7 @@ async def _read_json_request_body(
         )
 
     try:
-        return json.loads(request_body)
+        return json.loads(request_body), len(request_body)
     except ValueError as exc:
         raise _raise_http_error(
             metrics=metrics,
@@ -295,6 +298,24 @@ def _select_upstream(
     return selected.upstream.base_url, selected.upstream.authorization_token, selected.upstream.name
 
 
+def _ensure_known_model(
+    *,
+    routing_registry: RoutingRegistry,
+    model_name: str,
+    metrics: GatewayMetrics,
+    endpoint_name: str,
+) -> None:
+    try:
+        routing_registry.get_model_upstreams(model_name)
+    except UnknownModelError as exc:
+        raise _raise_http_error(
+            metrics=metrics,
+            endpoint=endpoint_name,
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+
 def _is_connect_stage_retryable_error(exc: Exception) -> bool:
     return isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout))
 
@@ -304,7 +325,13 @@ def _raise_upstream_transport_error(
     metrics: GatewayMetrics,
     endpoint_name: str,
     exc: Exception,
+    admission_controller: AdmissionController | None = None,
+    department: str | None = None,
+    model_name: str | None = None,
 ) -> HTTPException:
+    if admission_controller is not None and department is not None and model_name is not None:
+        admission_controller.record_retry_event(department=department, model_name=model_name)
+
     if isinstance(exc, httpx.TimeoutException):
         raise _raise_http_error(
             metrics=metrics,
@@ -385,6 +412,8 @@ async def _proxy_streaming_response(
     payload: dict[str, Any],
     model_name: str,
     usage_extractor: UsageExtractor,
+    admission_controller: AdmissionController,
+    admission_lease: AdmissionLease | None,
 ) -> Response:
     attempted_upstream_names: set[str] = {upstream_name}
     max_sse_decode_buffer_bytes = config.server.max_sse_decode_buffer_bytes
@@ -410,7 +439,11 @@ async def _proxy_streaming_response(
         except httpx.HTTPError as exc:
             if _is_connect_stage_retryable_error(exc):
                 try:
-                    upstream_base_url, upstream_authorization_token, upstream_name = _select_upstream(
+                    (
+                        upstream_base_url,
+                        upstream_authorization_token,
+                        upstream_name,
+                    ) = _select_upstream(
                         routing_registry=routing_registry,
                         model_name=model_name,
                         metrics=metrics,
@@ -422,6 +455,9 @@ async def _proxy_streaming_response(
                         metrics=metrics,
                         endpoint_name=endpoint_name,
                         exc=exc,
+                        admission_controller=admission_controller,
+                        department=department,
+                        model_name=model_name,
                     )
                 attempted_upstream_names.add(upstream_name)
                 continue
@@ -430,10 +466,15 @@ async def _proxy_streaming_response(
                 metrics=metrics,
                 endpoint_name=endpoint_name,
                 exc=exc,
+                admission_controller=admission_controller,
+                department=department,
+                model_name=model_name,
             )
 
     if upstream_response.status_code >= 400:
         set_request_metrics_failure_origin(request, failure_origin="upstream")
+    if upstream_response.status_code >= 500:
+        admission_controller.record_retry_event(department=department, model_name=model_name)
 
     async def _stream_bytes():
         latest_usage: tuple[int, int] | None = None
@@ -469,7 +510,8 @@ async def _proxy_streaming_response(
                             decode_buffer = ""
                             accounting_status_override = "parse_error"
                             logger.warning(
-                                "disabled stream usage parsing after SSE decode buffer exceeded limit",
+                                "disabled stream usage parsing after SSE decode buffer exceeded "
+                                "limit",
                                 extra={
                                     "endpoint": endpoint_name,
                                     "model_name": model_name,
@@ -504,9 +546,13 @@ async def _proxy_streaming_response(
             raise
         finally:
             await upstream_response.aclose()
+            admission_controller.release(admission_lease)
 
             if client_disconnected:
-                set_request_metrics_status_override(request, status_code=_CLIENT_DISCONNECTED_STATUS)
+                set_request_metrics_status_override(
+                    request,
+                    status_code=_CLIENT_DISCONNECTED_STATUS,
+                )
                 set_request_metrics_failure_origin(request, failure_origin="gateway")
                 metrics.record_token_accounting(
                     endpoint=endpoint_name,
@@ -515,7 +561,10 @@ async def _proxy_streaming_response(
                 return
 
             if stream_failed:
-                set_request_metrics_status_override(request, status_code=status.HTTP_502_BAD_GATEWAY)
+                set_request_metrics_status_override(
+                    request,
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                )
                 set_request_metrics_failure_origin(request, failure_origin="gateway")
                 metrics.record_token_accounting(
                     endpoint=endpoint_name,
@@ -530,7 +579,7 @@ async def _proxy_streaming_response(
                 )
                 return
 
-            _record_usage(
+            recorded_usage = _record_usage(
                 metrics=metrics,
                 department=department,
                 endpoint_name=endpoint_name,
@@ -538,6 +587,12 @@ async def _proxy_streaming_response(
                 upstream_status_code=upstream_response.status_code,
                 usage=latest_usage,
             )
+            if recorded_usage is not None:
+                admission_controller.record_tokens(
+                    department=department,
+                    model_name=model_name,
+                    tokens=sum(recorded_usage),
+                )
 
     return StreamingResponse(
         _stream_bytes(),
@@ -552,6 +607,7 @@ async def proxy_json_endpoint(
     config: AppConfig,
     routing_registry: RoutingRegistry,
     metrics: GatewayMetrics,
+    admission_controller: AdmissionController,
     source_resolution: SourceResolutionResult,
     upstream_http_client: httpx.AsyncClient,
     upstream_streaming_http_client: httpx.AsyncClient,
@@ -577,7 +633,7 @@ async def proxy_json_endpoint(
         endpoint_name=endpoint_name,
     )
 
-    payload = await _read_json_request_body(
+    payload, body_size = await _read_json_request_body(
         request=request,
         config=config,
         metrics=metrics,
@@ -589,96 +645,147 @@ async def proxy_json_endpoint(
         metrics=metrics,
         endpoint_name=endpoint_name,
     )
-    upstream_base_url, upstream_authorization_token, upstream_name = _select_upstream(
+    _ensure_known_model(
         routing_registry=routing_registry,
         model_name=model_name,
         metrics=metrics,
         endpoint_name=endpoint_name,
     )
+    payload = admission_controller.check_request_shape(
+        department=department,
+        model_name=model_name,
+        endpoint=endpoint_name,
+        body_size=body_size,
+        payload=payload,
+    )
+    admission_lease = admission_controller.acquire(
+        department=department,
+        model_name=model_name,
+        endpoint=endpoint_name,
+    )
 
     if payload.get("stream") is True:
-        return await _proxy_streaming_response(
-            request=request,
-            config=config,
-            routing_registry=routing_registry,
-            metrics=metrics,
-            upstream_streaming_http_client=upstream_streaming_http_client,
-            department=department,
-            endpoint_name=endpoint_name,
-            upstream_base_url=upstream_base_url,
-            upstream_path=upstream_path,
-            upstream_name=upstream_name,
-            upstream_authorization_token=upstream_authorization_token,
-            payload=payload,
-            model_name=model_name,
-            usage_extractor=usage_extractor,
-        )
-
-    attempted_upstream_names = {upstream_name}
-    request_timeout = _request_timeout(config)
-
-    while True:
         try:
-            upstream_response = await upstream_http_client.post(
-                f"{upstream_base_url}{upstream_path}",
-                json=payload,
-                headers=_build_upstream_headers(
-                    request,
-                    authorization_token=upstream_authorization_token,
-                ),
-                timeout=request_timeout,
-            )
-            break
-        except httpx.HTTPError as exc:
-            if _is_connect_stage_retryable_error(exc):
-                try:
-                    upstream_base_url, upstream_authorization_token, upstream_name = _select_upstream(
-                        routing_registry=routing_registry,
-                        model_name=model_name,
-                        metrics=metrics,
-                        endpoint_name=endpoint_name,
-                        excluded_upstream_names=attempted_upstream_names,
-                    )
-                except HTTPException:
-                    _raise_upstream_transport_error(
-                        metrics=metrics,
-                        endpoint_name=endpoint_name,
-                        exc=exc,
-                    )
-
-                attempted_upstream_names.add(upstream_name)
-                continue
-
-            _raise_upstream_transport_error(
+            upstream_base_url, upstream_authorization_token, upstream_name = _select_upstream(
+                routing_registry=routing_registry,
+                model_name=model_name,
                 metrics=metrics,
                 endpoint_name=endpoint_name,
-                exc=exc,
             )
+            return await _proxy_streaming_response(
+                request=request,
+                config=config,
+                routing_registry=routing_registry,
+                metrics=metrics,
+                upstream_streaming_http_client=upstream_streaming_http_client,
+                department=department,
+                endpoint_name=endpoint_name,
+                upstream_base_url=upstream_base_url,
+                upstream_path=upstream_path,
+                upstream_name=upstream_name,
+                upstream_authorization_token=upstream_authorization_token,
+                payload=payload,
+                model_name=model_name,
+                usage_extractor=usage_extractor,
+                admission_controller=admission_controller,
+                admission_lease=admission_lease,
+            )
+        except Exception:
+            admission_controller.release(admission_lease)
+            raise
 
-    if upstream_response.status_code >= 400:
-        set_request_metrics_failure_origin(request, failure_origin="upstream")
+    request_timeout = _request_timeout(config)
 
     try:
-        response_payload = upstream_response.json()
-    except ValueError:
-        metrics.record_token_accounting(endpoint=endpoint_name, accounting_status="parse_error")
+        upstream_base_url, upstream_authorization_token, upstream_name = _select_upstream(
+            routing_registry=routing_registry,
+            model_name=model_name,
+            metrics=metrics,
+            endpoint_name=endpoint_name,
+        )
+        attempted_upstream_names = {upstream_name}
+        while True:
+            try:
+                upstream_response = await upstream_http_client.post(
+                    f"{upstream_base_url}{upstream_path}",
+                    json=payload,
+                    headers=_build_upstream_headers(
+                        request,
+                        authorization_token=upstream_authorization_token,
+                    ),
+                    timeout=request_timeout,
+                )
+                break
+            except httpx.HTTPError as exc:
+                if _is_connect_stage_retryable_error(exc):
+                    try:
+                        (
+                            upstream_base_url,
+                            upstream_authorization_token,
+                            upstream_name,
+                        ) = _select_upstream(
+                            routing_registry=routing_registry,
+                            model_name=model_name,
+                            metrics=metrics,
+                            endpoint_name=endpoint_name,
+                            excluded_upstream_names=attempted_upstream_names,
+                        )
+                    except HTTPException:
+                        _raise_upstream_transport_error(
+                            metrics=metrics,
+                            endpoint_name=endpoint_name,
+                            exc=exc,
+                            admission_controller=admission_controller,
+                            department=department,
+                            model_name=model_name,
+                        )
+
+                    attempted_upstream_names.add(upstream_name)
+                    continue
+
+                _raise_upstream_transport_error(
+                    metrics=metrics,
+                    endpoint_name=endpoint_name,
+                    exc=exc,
+                    admission_controller=admission_controller,
+                    department=department,
+                    model_name=model_name,
+                )
+
+        if upstream_response.status_code >= 400:
+            set_request_metrics_failure_origin(request, failure_origin="upstream")
+        if upstream_response.status_code >= 500:
+            admission_controller.record_retry_event(department=department, model_name=model_name)
+
+        try:
+            response_payload = upstream_response.json()
+        except ValueError:
+            metrics.record_token_accounting(endpoint=endpoint_name, accounting_status="parse_error")
+            return Response(
+                content=upstream_response.content,
+                status_code=upstream_response.status_code,
+                media_type=upstream_response.headers.get("content-type"),
+            )
+
+        recorded_usage = _record_usage(
+            metrics=metrics,
+            department=department,
+            endpoint_name=endpoint_name,
+            model_name=model_name,
+            upstream_status_code=upstream_response.status_code,
+            usage=usage_extractor(response_payload),
+        )
+        if recorded_usage is not None:
+            admission_controller.record_tokens(
+                department=department,
+                model_name=model_name,
+                tokens=sum(recorded_usage),
+            )
+
         return Response(
             content=upstream_response.content,
             status_code=upstream_response.status_code,
-            media_type=upstream_response.headers.get("content-type"),
+            media_type=upstream_response.headers.get("content-type", "application/json"),
         )
-
-    _record_usage(
-        metrics=metrics,
-        department=department,
-        endpoint_name=endpoint_name,
-        model_name=model_name,
-        upstream_status_code=upstream_response.status_code,
-        usage=usage_extractor(response_payload),
-    )
-
-    return Response(
-        content=upstream_response.content,
-        status_code=upstream_response.status_code,
-        media_type=upstream_response.headers.get("content-type", "application/json"),
-    )
+    finally:
+        admission_controller.release(admission_lease)

@@ -21,6 +21,45 @@ routing:
 security:
   reject_unknown_api_keys: false
 
+admission_control:
+  # Admission state is in-memory and per process. Run one uvicorn worker when
+  # these limits are used in production; N workers make limits approximately N times larger.
+  # Model/department limits run after body read and JSON parse, so they protect
+  # upstream queues, not gateway ingress CPU/memory during large-body floods.
+  # Fairness is by department/model. Use separate bounded departments, such as
+  # data_platform_human and data_platform_agent, to isolate human and agent traffic.
+  # Department-scoped limits cannot target fallback department="unknown"; reject
+  # unknown API keys or use global_model_limits if that traffic must be controlled.
+  # Cross-reference validation runs when enabled=true, so validate enabled configs before rollout.
+  enabled: false
+  default_retry_after_seconds: 30
+  global_model_limits:
+    gpt-oss-120b:
+      max_active_requests: 20
+  department_model_limits:
+    - department: "data_platform"
+      model_name: "gpt-oss-120b"
+      max_active_requests: 4
+  token_budgets:
+    # Token budgets count completed 2xx responses with reliable usage only.
+    # They are not hard ceilings: in-flight oversubscription is bounded by
+    # active concurrency multiplied by the per-request output cap below.
+    - department: "data_platform"
+      model_name: "gpt-oss-120b"
+      max_tokens: 1000000
+      window_seconds: 3600
+  request_shape_limits:
+    gpt-oss-120b:
+      max_request_body_bytes: 4194304
+      # Also used as the default output cap when clients omit max_tokens/max_output_tokens.
+      max_output_tokens: 4096
+      reject_n_greater_than_one: true
+  retry_guard:
+    enabled: false
+    window_seconds: 60
+    max_events: 10
+    cooldown_seconds: 30
+
 upstreams:
   - name: "gpt-oss-120b-a"
     base_url: "http://10.0.0.11:8000"
