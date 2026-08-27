@@ -664,6 +664,9 @@ Rollback decision guidance:
 
 Use this runbook for first-pass diagnosis before changing code.
 
+For vLLM-side request-id log correlation, use
+[docs/request-id-middleware-playbook.md](docs/request-id-middleware-playbook.md).
+
 Container is not running:
 
 ```bash
@@ -1499,6 +1502,11 @@ Operationally useful baseline fields include:
 - `duration_seconds`
 - `request_id` when present
 - `trace_id` when present
+
+Gateway logs can record caller-provided request ids. vLLM Docker logs require
+the request-id middleware documented in
+[docs/request-id-middleware-playbook.md](docs/request-id-middleware-playbook.md)
+when operators need to grep upstream logs by the same id.
 
 For MVP planning:
 
