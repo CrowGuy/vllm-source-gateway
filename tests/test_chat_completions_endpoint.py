@@ -65,6 +65,21 @@ def test_chat_completions_proxies_success_and_records_usage(
         in metrics_text
     )
     assert (
+        'gateway_model_http_requests_total{department="dept-a",endpoint="chat_completions",'
+        'method="POST",model_name="shared-model",status_class="2xx"} 1.0'
+        in metrics_text
+    )
+    assert (
+        'gateway_model_request_duration_seconds_count{department="dept-a",'
+        'endpoint="chat_completions",method="POST",model_name="shared-model"} 1.0'
+        in metrics_text
+    )
+    assert (
+        'gateway_model_token_accounting_total{accounting_status="recorded",'
+        'department="dept-a",endpoint="chat_completions",model_name="shared-model"} 1.0'
+        in metrics_text
+    )
+    assert (
         'gateway_source_resolution_total{department="dept-a",resolution_source="api_key"} 1.0'
         in metrics_text
     )
@@ -91,6 +106,10 @@ def test_chat_completions_returns_404_for_unknown_model(app_client) -> None:
 
     assert response.status_code == 404
     assert response.json() == {"detail": "unknown model 'missing-model'"}
+
+    metrics_text = app_client.get("/metrics").text
+    assert "gateway_model_http_requests_total{" not in metrics_text
+    assert "gateway_model_token_accounting_total{" not in metrics_text
 
 
 def test_chat_completions_returns_504_on_upstream_timeout(

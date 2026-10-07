@@ -15,6 +15,14 @@ def test_request_duration_histogram_uses_llm_latency_buckets() -> None:
         status_code=200,
         duration_seconds=11.0,
     )
+    metrics.observe_model_request(
+        department="dept-a",
+        model_name="shared-model",
+        endpoint="chat_completions",
+        method="POST",
+        status_code=200,
+        duration_seconds=11.0,
+    )
 
     metrics_text = generate_latest(metrics.registry).decode("utf-8")
 
@@ -31,6 +39,17 @@ def test_request_duration_histogram_uses_llm_latency_buckets() -> None:
     assert (
         'gateway_request_duration_seconds_bucket{department="dept-a",'
         'endpoint="chat_completions",le="120.0",method="POST"} 1.0'
+        in metrics_text
+    )
+    assert (
+        'gateway_model_http_requests_total{department="dept-a",endpoint="chat_completions",'
+        'method="POST",model_name="shared-model",status_class="2xx"} 1.0'
+        in metrics_text
+    )
+    assert (
+        'gateway_model_request_duration_seconds_bucket{department="dept-a",'
+        'endpoint="chat_completions",le="20.0",method="POST",'
+        'model_name="shared-model"} 1.0'
         in metrics_text
     )
 
@@ -85,6 +104,12 @@ def test_upstream_observability_metrics_use_bounded_labels() -> None:
         duration_seconds=0.1,
     )
     metrics.record_upstream_selection(model_name="shared-model", upstream_name="gpu-a")
+    metrics.record_model_token_accounting(
+        department="dept-a",
+        model_name="shared-model",
+        endpoint="chat_completions",
+        accounting_status="recorded",
+    )
 
     metrics_text = generate_latest(metrics.registry).decode("utf-8")
 
@@ -100,5 +125,10 @@ def test_upstream_observability_metrics_use_bounded_labels() -> None:
     )
     assert (
         'gateway_upstream_selections_total{model_name="shared-model",upstream_name="gpu-a"} 1.0'
+        in metrics_text
+    )
+    assert (
+        'gateway_model_token_accounting_total{accounting_status="recorded",'
+        'department="dept-a",endpoint="chat_completions",model_name="shared-model"} 1.0'
         in metrics_text
     )

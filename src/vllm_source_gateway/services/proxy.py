@@ -18,6 +18,7 @@ from vllm_source_gateway.metrics import GatewayMetrics
 from vllm_source_gateway.request_metrics import (
     set_request_metrics_context,
     set_request_metrics_failure_origin,
+    set_request_metrics_model,
     set_request_metrics_status_override,
 )
 from vllm_source_gateway.routing import NoHealthyUpstreamError, RoutingRegistry, UnknownModelError
@@ -93,6 +94,26 @@ def _build_upstream_headers(
     return headers
 
 
+def _record_token_accounting(
+    *,
+    metrics: GatewayMetrics,
+    department: str,
+    model_name: str,
+    endpoint_name: str,
+    accounting_status: str,
+) -> None:
+    metrics.record_token_accounting(
+        endpoint=endpoint_name,
+        accounting_status=accounting_status,
+    )
+    metrics.record_model_token_accounting(
+        department=department,
+        model_name=model_name,
+        endpoint=endpoint_name,
+        accounting_status=accounting_status,
+    )
+
+
 def _record_usage(
     *,
     metrics: GatewayMetrics,
@@ -103,11 +124,23 @@ def _record_usage(
     usage: tuple[int, int] | None,
 ) -> tuple[int, int] | None:
     if not 200 <= upstream_status_code < 300:
-        metrics.record_token_accounting(endpoint=endpoint_name, accounting_status="missing_usage")
+        _record_token_accounting(
+            metrics=metrics,
+            department=department,
+            model_name=model_name,
+            endpoint_name=endpoint_name,
+            accounting_status="missing_usage",
+        )
         return None
 
     if usage is None:
-        metrics.record_token_accounting(endpoint=endpoint_name, accounting_status="missing_usage")
+        _record_token_accounting(
+            metrics=metrics,
+            department=department,
+            model_name=model_name,
+            endpoint_name=endpoint_name,
+            accounting_status="missing_usage",
+        )
         return None
 
     prompt_tokens, generation_tokens = usage
@@ -121,7 +154,13 @@ def _record_usage(
         model_name=model_name,
         generation_tokens=generation_tokens,
     )
-    metrics.record_token_accounting(endpoint=endpoint_name, accounting_status="recorded")
+    _record_token_accounting(
+        metrics=metrics,
+        department=department,
+        model_name=model_name,
+        endpoint_name=endpoint_name,
+        accounting_status="recorded",
+    )
     return usage
 
 
@@ -576,8 +615,11 @@ async def _proxy_streaming_response(
                     status_code=_CLIENT_DISCONNECTED_STATUS,
                 )
                 set_request_metrics_failure_origin(request, failure_origin="gateway")
-                metrics.record_token_accounting(
-                    endpoint=endpoint_name,
+                _record_token_accounting(
+                    metrics=metrics,
+                    department=department,
+                    model_name=model_name,
+                    endpoint_name=endpoint_name,
                     accounting_status="missing_usage",
                 )
                 return
@@ -588,15 +630,21 @@ async def _proxy_streaming_response(
                     status_code=status.HTTP_502_BAD_GATEWAY,
                 )
                 set_request_metrics_failure_origin(request, failure_origin="gateway")
-                metrics.record_token_accounting(
-                    endpoint=endpoint_name,
+                _record_token_accounting(
+                    metrics=metrics,
+                    department=department,
+                    model_name=model_name,
+                    endpoint_name=endpoint_name,
                     accounting_status="missing_usage",
                 )
                 return
 
             if accounting_status_override is not None:
-                metrics.record_token_accounting(
-                    endpoint=endpoint_name,
+                _record_token_accounting(
+                    metrics=metrics,
+                    department=department,
+                    model_name=model_name,
+                    endpoint_name=endpoint_name,
                     accounting_status=accounting_status_override,
                 )
                 return
@@ -673,6 +721,7 @@ async def proxy_json_endpoint(
         metrics=metrics,
         endpoint_name=endpoint_name,
     )
+    set_request_metrics_model(request, model_name=model_name)
     payload = admission_controller.check_request_shape(
         department=department,
         model_name=model_name,
@@ -789,7 +838,13 @@ async def proxy_json_endpoint(
         try:
             response_payload = upstream_response.json()
         except ValueError:
-            metrics.record_token_accounting(endpoint=endpoint_name, accounting_status="parse_error")
+            _record_token_accounting(
+                metrics=metrics,
+                department=department,
+                model_name=model_name,
+                endpoint_name=endpoint_name,
+                accounting_status="parse_error",
+            )
             return Response(
                 content=upstream_response.content,
                 status_code=upstream_response.status_code,

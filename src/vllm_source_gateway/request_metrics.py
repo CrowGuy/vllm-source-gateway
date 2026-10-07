@@ -12,6 +12,7 @@ _REQUEST_STARTED_AT = "_gateway_request_metrics_started_at"
 _REQUEST_RECORDED = "_gateway_request_metrics_recorded"
 _REQUEST_ENDPOINT = "_gateway_request_metrics_endpoint"
 _REQUEST_DEPARTMENT = "_gateway_request_metrics_department"
+_REQUEST_MODEL = "_gateway_request_metrics_model"
 _REQUEST_STATUS_CODE_OVERRIDE = "_gateway_request_metrics_status_code_override"
 _REQUEST_FAILURE_ORIGIN = "_gateway_request_metrics_failure_origin"
 
@@ -20,6 +21,7 @@ _REQUEST_FAILURE_ORIGIN = "_gateway_request_metrics_failure_origin"
 class RequestMetricsSnapshot:
     department: str | None
     endpoint: str | None
+    model_name: str | None
     method: str
     status_code: int
     duration_seconds: float
@@ -31,6 +33,7 @@ def initialize_request_metrics_state(request: Request) -> None:
     request.state.__setattr__(_REQUEST_RECORDED, False)
     request.state.__setattr__(_REQUEST_ENDPOINT, None)
     request.state.__setattr__(_REQUEST_DEPARTMENT, None)
+    request.state.__setattr__(_REQUEST_MODEL, None)
     request.state.__setattr__(_REQUEST_STATUS_CODE_OVERRIDE, None)
     request.state.__setattr__(_REQUEST_FAILURE_ORIGIN, None)
 
@@ -38,6 +41,10 @@ def initialize_request_metrics_state(request: Request) -> None:
 def set_request_metrics_context(request: Request, *, department: str, endpoint: str) -> None:
     request.state.__setattr__(_REQUEST_DEPARTMENT, department)
     request.state.__setattr__(_REQUEST_ENDPOINT, endpoint)
+
+
+def set_request_metrics_model(request: Request, *, model_name: str) -> None:
+    request.state.__setattr__(_REQUEST_MODEL, model_name)
 
 
 def set_request_metrics_status_override(request: Request, *, status_code: int) -> None:
@@ -59,6 +66,7 @@ def build_request_metrics_snapshot(
 
     department = getattr(request.state, _REQUEST_DEPARTMENT, None)
     endpoint = getattr(request.state, _REQUEST_ENDPOINT, None)
+    model_name = getattr(request.state, _REQUEST_MODEL, None)
     status_code_override = getattr(request.state, _REQUEST_STATUS_CODE_OVERRIDE, None)
     status_code = status_code_override if status_code_override is not None else default_status_code
     failure_origin = getattr(request.state, _REQUEST_FAILURE_ORIGIN, None)
@@ -68,6 +76,7 @@ def build_request_metrics_snapshot(
     return RequestMetricsSnapshot(
         department=department,
         endpoint=endpoint,
+        model_name=model_name,
         method=request.method,
         status_code=status_code,
         duration_seconds=time.perf_counter() - started_at,
@@ -96,6 +105,15 @@ def finalize_request_metrics(
             status_code=snapshot.status_code,
             duration_seconds=snapshot.duration_seconds,
         )
+        if snapshot.model_name is not None:
+            metrics.observe_model_request(
+                department=snapshot.department,
+                model_name=snapshot.model_name,
+                endpoint=snapshot.endpoint,
+                method=snapshot.method,
+                status_code=snapshot.status_code,
+                duration_seconds=snapshot.duration_seconds,
+            )
         if snapshot.failure_origin is not None:
             metrics.record_request_failure(
                 department=snapshot.department,

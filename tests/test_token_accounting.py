@@ -38,6 +38,11 @@ def test_chat_completions_records_parse_error_and_returns_raw_body(
         'gateway_token_accounting_total{accounting_status="parse_error",endpoint="chat_completions"} 1.0'
         in metrics_text
     )
+    assert (
+        'gateway_model_token_accounting_total{accounting_status="parse_error",'
+        'department="dept-a",endpoint="chat_completions",model_name="shared-model"} 1.0'
+        in metrics_text
+    )
     assert 'gateway_prompt_tokens_total{department="dept-a",model_name="shared-model"}' not in metrics_text
     assert 'gateway_generation_tokens_total{department="dept-a",model_name="shared-model"}' not in metrics_text
 

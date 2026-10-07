@@ -54,6 +54,7 @@ def test_build_access_log_fields_includes_request_context() -> None:
     snapshot = RequestMetricsSnapshot(
         department="dept-a",
         endpoint="chat_completions",
+        model_name=None,
         method="POST",
         status_code=200,
         duration_seconds=0.1234567,

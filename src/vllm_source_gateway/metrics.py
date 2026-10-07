@@ -42,6 +42,19 @@ class GatewayMetrics:
             buckets=REQUEST_DURATION_BUCKETS,
             registry=self.registry,
         )
+        self.model_http_requests_total = Counter(
+            "gateway_model_http_requests_total",
+            "Handled HTTP requests by department, model, and endpoint.",
+            labelnames=("department", "model_name", "endpoint", "method", "status_class"),
+            registry=self.registry,
+        )
+        self.model_request_duration_seconds = Histogram(
+            "gateway_model_request_duration_seconds",
+            "End-to-end gateway handling duration by department, model, and endpoint.",
+            labelnames=("department", "model_name", "endpoint", "method"),
+            buckets=REQUEST_DURATION_BUCKETS,
+            registry=self.registry,
+        )
         self.http_request_failures_total = Counter(
             "gateway_http_request_failures_total",
             "Handled HTTP failures by department, endpoint, and failure origin.",
@@ -70,6 +83,12 @@ class GatewayMetrics:
             "gateway_token_accounting_total",
             "Token accounting outcomes by endpoint.",
             labelnames=("endpoint", "accounting_status"),
+            registry=self.registry,
+        )
+        self.model_token_accounting_total = Counter(
+            "gateway_model_token_accounting_total",
+            "Token accounting outcomes by department, model, and endpoint.",
+            labelnames=("department", "model_name", "endpoint", "accounting_status"),
             registry=self.registry,
         )
         self.admission_rejections_total = Counter(
@@ -139,6 +158,31 @@ class GatewayMetrics:
             method=method.upper(),
         ).observe(duration_seconds)
 
+    def observe_model_request(
+        self,
+        *,
+        department: str,
+        model_name: str,
+        endpoint: str,
+        method: str,
+        status_code: int,
+        duration_seconds: float,
+    ) -> None:
+        status_class = _status_class(status_code)
+        self.model_http_requests_total.labels(
+            department=department,
+            model_name=model_name,
+            endpoint=endpoint,
+            method=method.upper(),
+            status_class=status_class,
+        ).inc()
+        self.model_request_duration_seconds.labels(
+            department=department,
+            model_name=model_name,
+            endpoint=endpoint,
+            method=method.upper(),
+        ).observe(duration_seconds)
+
     def record_request_failure(
         self,
         *,
@@ -186,6 +230,21 @@ class GatewayMetrics:
 
     def record_token_accounting(self, *, endpoint: str, accounting_status: str) -> None:
         self.token_accounting_total.labels(
+            endpoint=endpoint,
+            accounting_status=accounting_status,
+        ).inc()
+
+    def record_model_token_accounting(
+        self,
+        *,
+        department: str,
+        model_name: str,
+        endpoint: str,
+        accounting_status: str,
+    ) -> None:
+        self.model_token_accounting_total.labels(
+            department=department,
+            model_name=model_name,
             endpoint=endpoint,
             accounting_status=accounting_status,
         ).inc()

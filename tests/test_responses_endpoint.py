@@ -60,6 +60,16 @@ def test_responses_proxies_success_and_records_usage(
     assert 'gateway_prompt_tokens_total{department="dept-b",model_name="model-b"} 8.0' in metrics_text
     assert 'gateway_generation_tokens_total{department="dept-b",model_name="model-b"} 21.0' in metrics_text
     assert 'gateway_token_accounting_total{accounting_status="recorded",endpoint="responses"} 1.0' in metrics_text
+    assert (
+        'gateway_model_http_requests_total{department="dept-b",endpoint="responses",'
+        'method="POST",model_name="model-b",status_class="2xx"} 1.0'
+        in metrics_text
+    )
+    assert (
+        'gateway_model_token_accounting_total{accounting_status="recorded",'
+        'department="dept-b",endpoint="responses",model_name="model-b"} 1.0'
+        in metrics_text
+    )
 
 
 def test_responses_tracks_missing_usage_without_guessing_tokens(
@@ -92,6 +102,11 @@ def test_responses_tracks_missing_usage_without_guessing_tokens(
     metrics_text = metrics_response.text
 
     assert 'gateway_token_accounting_total{accounting_status="missing_usage",endpoint="responses"} 1.0' in metrics_text
+    assert (
+        'gateway_model_token_accounting_total{accounting_status="missing_usage",'
+        'department="dept-b",endpoint="responses",model_name="model-b"} 1.0'
+        in metrics_text
+    )
     assert 'gateway_prompt_tokens_total{department="dept-b",model_name="model-b"}' not in metrics_text
     assert 'gateway_generation_tokens_total{department="dept-b",model_name="model-b"}' not in metrics_text
 
@@ -129,6 +144,8 @@ def test_responses_returns_422_when_model_is_missing(app_client) -> None:
         'gateway_http_request_failures_total{department="dept-b",endpoint="responses",failure_origin="gateway",method="POST",status_class="4xx"} 1.0'
         in metrics_text
     )
+    assert "gateway_model_http_requests_total{" not in metrics_text
+    assert "gateway_model_token_accounting_total{" not in metrics_text
 
 
 def test_responses_streams_sse_and_tracks_missing_usage(

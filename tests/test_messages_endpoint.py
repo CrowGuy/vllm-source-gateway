@@ -79,6 +79,16 @@ def test_messages_proxies_success_and_records_usage(
     assert 'gateway_generation_tokens_total{department="dept-a",model_name="shared-model"} 34.0' in metrics_text
     assert 'gateway_http_requests_total{department="dept-a",endpoint="messages",method="POST",status_class="2xx"} 1.0' in metrics_text
     assert 'gateway_token_accounting_total{accounting_status="recorded",endpoint="messages"} 1.0' in metrics_text
+    assert (
+        'gateway_model_http_requests_total{department="dept-a",endpoint="messages",'
+        'method="POST",model_name="shared-model",status_class="2xx"} 1.0'
+        in metrics_text
+    )
+    assert (
+        'gateway_model_token_accounting_total{accounting_status="recorded",'
+        'department="dept-a",endpoint="messages",model_name="shared-model"} 1.0'
+        in metrics_text
+    )
 
 
 def test_messages_resolves_department_from_bearer_api_key(
@@ -214,6 +224,8 @@ def test_messages_returns_422_when_model_is_missing(app_client) -> None:
         'gateway_http_request_failures_total{department="dept-a",endpoint="messages",failure_origin="gateway",method="POST",status_class="4xx"} 1.0'
         in metrics_text
     )
+    assert "gateway_model_http_requests_total{" not in metrics_text
+    assert "gateway_model_token_accounting_total{" not in metrics_text
 
 
 def test_messages_streams_sse_and_tracks_usage(
